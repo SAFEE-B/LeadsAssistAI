@@ -385,7 +385,7 @@ def process_queries(queries, result_queue, output_file):
                 
 if __name__ == "__main__":
     input_file = "queries.txt"
-    output_file = "LeadsApart.csv"
+    output_file = "./Outputs/LeadsApart.csv"
 
     with open(input_file, mode='r', encoding='utf-8') as file:
         queries = [line.strip() for line in file if line.strip()]

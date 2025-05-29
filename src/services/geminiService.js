@@ -119,7 +119,7 @@ class GeminiService {
             properties: {
               location: {
                 type: "string",
-                description: "Location to search (city, state, or zip code)"
+                description: "Location to search. Can be a single city, state, or zip code, or a comma-separated list of locations (e.g., 'New York, NY' or '90210, 90001, 90212')."
               },
               businessType: {
                 type: "string", 
