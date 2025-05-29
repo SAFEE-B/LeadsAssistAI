@@ -1,0 +1,70 @@
+/* General App Styling */
+.App {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+nav {
+  background-color: #282c34; /* Darker background for nav */
+  padding: 10px 0;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+nav ul {
+  display: flex;
+  justify-content: center; /* Center nav items */
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+nav li {
+  margin: 0 10px; /* Spacing between nav items */
+}
+
+nav li a, nav li button {
+  color: white;
+  text-decoration: none;
+  padding: 8px 15px;
+  border-radius: 4px;
+  transition: background-color 0.3s ease;
+  border: none;
+  background-color: transparent;
+  cursor: pointer;
+  font-size: 16px;
+}
+
+nav li a:hover, nav li button:hover {
+  background-color: #525863; /* Slightly lighter on hover */
+}
+
+nav li button {
+  font-family: inherit; /* Ensure button inherits font */
+}
+
+.App-content {
+  flex-grow: 1; /* Allows content to take up available space */
+  padding: 20px;
+  background-color: #f0f2f5; /* Light grey background for content area */
+  display: flex;
+  flex-direction: column;
+  align-items: center; /* Center content horizontally */
+}
+
+/* General Page Title Styling */
+h2 {
+  color: #333;
+  margin-bottom: 20px;
+}
+
+/* Placeholder for page-specific content styling */
+.page-container {
+  background-color: #fff;
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 0 10px rgba(0,0,0,0.1);
+  width: 100%;
+  max-width: 900px; /* Max width for content pages */
+  text-align: left; /* Align text to left for content */
+} 
