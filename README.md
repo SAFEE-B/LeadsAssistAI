@@ -5,9 +5,9 @@ An automated lead generation system with queue management and **LLM conversation
 ## Features
 
 - **LLM Conversational Interface**: Natural language chatbot for lead queries and job management
-- **Queue-based Architecture**: Single scraper queue with multiple processing queues for optimal resource utilization
-- **Automated Workflow**: Scraping → Formatting → FindLeads processing pipeline
-- **Concurrent Processing**: Multiple formatter and findleads jobs can run simultaneously
+- **Queue-based Architecture**: A dedicated `scraperQueue` for web scraping tasks and a versatile `processingQueue` for subsequent data handling (e.g., formatting, enriching).
+- **Automated Workflow**: Scraper (Python) -> `LeadsApart.csv` -> Processing (e.g., formatting to Excel, further enrichment).
+- **Concurrent Processing**: The `processingQueue` can handle multiple job types (like formatting, lead enrichment) concurrently.
 - **Intelligent Lead Search**: Enhanced search with multiple filters, combinations, and natural language queries
 - **Delivery Management**: Track and manage completed files with download capabilities
 - **REST API**: Comprehensive API for managing jobs, querying leads, and file operations
@@ -37,24 +37,66 @@ An automated lead generation system with queue management and **LLM conversation
 │  /api/conversation  → LLM chat processing                      │
 │  /api/delivery      → File delivery management                 │
 │  /api/leads/search  → Enhanced lead search                     │
-│  /api/scraper       → Job creation & management                │
+│  /api/scraper       → Scraper job creation & management        │
+│  /api/processing    → Processing job creation & management     │
 │  /api/status        → Real-time monitoring                     │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
 ## Architecture
 
+The system uses a two-stage queue process:
+
+1.  **Scraper Queue (`scraperQueue`):**
+    *   Handles 'scrape' jobs.
+    *   A job is added via the API (e.g., business type and zip code).
+    *   The `scraperProcessor.js` picks up the job.
+    *   It writes the query to `queries.txt`.
+    *   It executes the Python script (`maintemp.py`).
+    *   `maintemp.py` reads `queries.txt` and outputs `LeadsApart.csv`.
+    *   The processor then may trigger a job on the `processingQueue`.
+
+2.  **Processing Queue (`processingQueue`):**
+    *   Handles various job types for data manipulation after scraping (e.g., 'format', 'findleads_enrich').
+    *   Example: A 'format' job could take `LeadsApart.csv`, process it using `formatter.py`, and output a formatted Excel file.
+    *   Example: A 'findleads_enrich' job could take formatted data, use `FindLeadsAndAddSource.py` to add more details, and update the database or generate another file.
+    *   This queue allows for concurrent execution of these processing tasks.
+
 ```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Google Maps   │    │   Formatter     │    │   FindLeads     │
-│    Scraper      │───▶│     Queue       │───▶│     Queue       │
-│   (Single)      │    │  (Multiple)     │    │   (Multiple)    │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-         │                       │                       │
-         ▼                       ▼                       ▼
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│  LeadsApart.csv │    │  Formatted.xlsx │    │  Final.xlsx     │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
+┌─────────────────┐      ┌────────────────────┐      ┌───────────────────────┐
+│ Client Request  │─────▶│    API Endpoint    │─────▶│      scraperQueue     │
+│ (BizType, ZIP)  │      │ (/api/scraper/start)│      │ (Job: 'scrape')       │
+└─────────────────┘      └────────────────────┘      └───────────┬───────────┘
+                                                                 │ (scraperProcessor.js)
+                                                                 ▼
+                                                      ┌────────────────────┐
+                                                      │   Writes to        │
+                                                      │   queries.txt      │
+                                                      └───────────┬──────────┘
+                                                                 │
+                                                      ┌────────────────────┐
+                                                      │   Executes         │
+                                                      │   maintemp.py      │
+                                                      └───────────┬──────────┘
+                                                                 │ (Outputs)
+                                                      ┌────────────────────┐
+                                                      │   LeadsApart.csv   │
+                                                      └───────────┬──────────┘
+                                                                 │ (Optionally triggers next stage)
+                                                                 ▼
+┌───────────────────────────────────────────────────────────────┐
+│                       processingQueue                         │
+│ (Handles various job types like 'format', 'findleads_enrich') │
+│                                                               │
+│ ┌────────────────────┐      ┌────────────────────┐          │
+│ │ Job Type: 'format' │      │ Job Type: 'enrich' │ ... etc.  │
+│ └─────────┬──────────┘      └─────────┬──────────┘          │
+│           │ (formatter.py)            │ (FindLeads...)        │
+│           ▼                           ▼                       │
+│ ┌────────────────────┐      ┌────────────────────┐          │
+│ │ Formatted.xlsx     │      │ EnrichedData.xlsx  │          │
+│ └────────────────────┘      └────────────────────┘          │
+└───────────────────────────────────────────────────────────────┘
 ```
 
 ## Prerequisites
@@ -129,9 +171,9 @@ PROCESSOR_QUEUE_CONCURRENCY=5
 
 # Python Scripts
 PYTHON_INTERPRETER=python
-SCRAPER_SCRIPT_PATH=./maintemp.py
-FORMATTER_SCRIPT_PATH=./formatter.py
-FINDLEADS_SCRIPT_PATH=./FindLeadsAndAddSource.py
+SCRAPER_SCRIPT_PATH=./maintemp.py # Reads queries.txt, outputs LeadsApart.csv
+FORMATTER_SCRIPT_PATH=./formatter.py # Example: Reads CSV, outputs formatted XLSX
+FINDLEADS_SCRIPT_PATH=./FindLeadsAndAddSource.py # Example: Enriches data
 
 # File Paths
 FILES_DIRECTORY=./Files
@@ -192,22 +234,25 @@ POST /processing/format
 Content-Type: application/json
 
 {
-  "inputFile": "./LeadsApart.csv",
+  "inputFile": "./LeadsApart.csv", // Typically output from scraper
   "outputFile": "./Files/formatted_leads.xlsx",
-  "clientName": "John Doe"
+  "clientName": "John Doe",
+  "jobType": "format" // Explicitly define job type for the processing queue
 }
 ```
 
 #### Start FindLeads Job
 ```http
-POST /processing/findleads
+POST /processing/findleads 
 Content-Type: application/json
 
 {
+  "inputFile": "./Files/formatted_leads.xlsx", // Typically output from formatter
   "businessTypes": ["gyms", "restaurants"],
   "zipCodes": ["90210", "10001"],
   "states": ["CA", "NY"],
-  "clientName": "John Doe"
+  "clientName": "John Doe",
+  "jobType": "findleads_enrich" // Explicitly define job type
 }
 ```
 

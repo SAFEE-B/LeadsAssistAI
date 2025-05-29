@@ -488,6 +488,76 @@ function areProcessorsReady() {
     return processorsReady;
 }
 
+async function getQueueStats() {
+  try {
+    if (!scraperQueue || !processingQueue) {
+      queueLogger.warn('Queue stats requested but queues not initialized, returning mock stats');
+      return {
+        scraper: {
+          waiting: 0,
+          active: 0,
+          completed: 0,
+          failed: 0,
+          delayed: 0,
+          paused: 0
+        },
+        processing: {
+          waiting: 0,
+          active: 0,
+          completed: 0,
+          failed: 0,
+          delayed: 0,
+          paused: 0
+        }
+      };
+    }
+
+    // Get queue job counts
+    const scraperCounts = await scraperQueue.getJobCounts();
+    const processingCounts = await processingQueue.getJobCounts();
+
+    return {
+      scraper: {
+        waiting: scraperCounts.waiting || 0,
+        active: scraperCounts.active || 0,
+        completed: scraperCounts.completed || 0,
+        failed: scraperCounts.failed || 0,
+        delayed: scraperCounts.delayed || 0,
+        paused: scraperCounts.paused || 0
+      },
+      processing: {
+        waiting: processingCounts.waiting || 0,
+        active: processingCounts.active || 0,
+        completed: processingCounts.completed || 0,
+        failed: processingCounts.failed || 0,
+        delayed: processingCounts.delayed || 0,
+        paused: processingCounts.paused || 0
+      }
+    };
+  } catch (error) {
+    queueLogger.error('Error getting queue stats:', { message: error.message, stack: error.stack });
+    // Return default stats on error
+    return {
+      scraper: {
+        waiting: 0,
+        active: 0,
+        completed: 0,
+        failed: 0,
+        delayed: 0,
+        paused: 0
+      },
+      processing: {
+        waiting: 0,
+        active: 0,
+        completed: 0,
+        failed: 0,
+        delayed: 0,
+        paused: 0
+      }
+    };
+  }
+}
+
 async function gracefulShutdown() {
   queueLogger.info('Attempting graceful shutdown of queues...');
   try {
@@ -513,6 +583,7 @@ module.exports = {
   addProcessingJob,
   getScraperQueue,
   getProcessingQueue,
+  getQueueStats,
   gracefulShutdown,
   areProcessorsReady,
   connectToRedis // Exporting for potential external checks if ever needed

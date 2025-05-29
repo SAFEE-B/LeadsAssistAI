@@ -42,6 +42,16 @@ async function setupDatabase() {
 
 async function createTables() {
   const tables = [
+    // Users table - stores user authentication data
+    `CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      email TEXT UNIQUE NOT NULL,
+      password TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`,
+
     // Leads table - stores all business leads
     `CREATE TABLE IF NOT EXISTS leads (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -131,6 +141,22 @@ async function createTables() {
       key TEXT PRIMARY KEY,
       value TEXT,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`,
+
+    // Deliveries table - tracks generated files for download
+    `CREATE TABLE IF NOT EXISTS deliveries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      file_id TEXT UNIQUE NOT NULL,
+      filename TEXT NOT NULL,
+      format TEXT NOT NULL, -- 'csv', 'excel', 'xlsx'
+      lead_count INTEGER DEFAULT 0,
+      filters TEXT, -- JSON filters used to generate the file
+      request_type TEXT, -- 'export', 'search', etc.
+      file_size INTEGER DEFAULT 0,
+      file_path TEXT NOT NULL,
+      status TEXT DEFAULT 'pending', -- 'pending', 'completed', 'failed'
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      downloaded_at DATETIME
     )`
   ];
 
@@ -149,6 +175,7 @@ async function createTables() {
 
   // Create indexes for better performance
   const indexes = [
+    'CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)',
     'CREATE INDEX IF NOT EXISTS idx_leads_phone ON leads(phone_number)',
     'CREATE INDEX IF NOT EXISTS idx_leads_business_type ON leads(type_of_business)',
     'CREATE INDEX IF NOT EXISTS idx_leads_zip_code ON leads(zip_code)',
@@ -156,7 +183,10 @@ async function createTables() {
     'CREATE INDEX IF NOT EXISTS idx_leads_created_at ON leads(created_at)',
     'CREATE INDEX IF NOT EXISTS idx_scraping_jobs_status ON scraping_jobs(status)',
     'CREATE INDEX IF NOT EXISTS idx_processing_jobs_status ON processing_jobs(status)',
-    'CREATE INDEX IF NOT EXISTS idx_search_queries_status ON search_queries(status)'
+    'CREATE INDEX IF NOT EXISTS idx_search_queries_status ON search_queries(status)',
+    'CREATE INDEX IF NOT EXISTS idx_deliveries_status ON deliveries(status)',
+    'CREATE INDEX IF NOT EXISTS idx_deliveries_file_id ON deliveries(file_id)',
+    'CREATE INDEX IF NOT EXISTS idx_deliveries_created_at ON deliveries(created_at)'
   ];
 
   for (const indexSQL of indexes) {

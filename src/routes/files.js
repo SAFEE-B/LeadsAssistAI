@@ -4,6 +4,7 @@ const path = require('path');
 const fs = require('fs').promises;
 const XLSX = require('xlsx');
 const logger = require('../utils/logger');
+const { getOne, runQuery } = require('../database/setup');
 
 const router = express.Router();
 
@@ -74,8 +75,79 @@ router.post('/upload', upload.single('file'), async (req, res) => {
   }
 });
 
-// Download file endpoint
-router.get('/download/:filename', async (req, res) => {
+// Download file endpoint for generated files (by fileId from deliveries)
+router.get('/download/:fileId', async (req, res) => {
+  try {
+    const { fileId } = req.params;
+
+    // Get file info from deliveries table
+    const fileQuery = `
+      SELECT file_id, filename, file_path, format, lead_count, file_size
+      FROM deliveries 
+      WHERE file_id = ? AND status = 'completed'
+    `;
+    
+    const fileInfo = await getOne(fileQuery, [fileId]);
+    
+    if (!fileInfo) {
+      return res.status(404).json({ 
+        error: 'File not found',
+        message: 'The requested file does not exist or is not ready for download'
+      });
+    }
+
+    // Check if file exists on disk
+    const filePath = fileInfo.file_path;
+    try {
+      await fs.access(filePath);
+    } catch (e) {
+      return res.status(404).json({
+        error: 'File not found on disk',
+        message: 'The file may have been moved or deleted'
+      });
+    }
+
+    // Update downloaded_at timestamp
+    const updateQuery = `
+      UPDATE deliveries 
+      SET downloaded_at = datetime('now') 
+      WHERE file_id = ?
+    `;
+    await runQuery(updateQuery, [fileId]);
+
+    // Set appropriate headers
+    const contentType = fileInfo.format === 'excel' || fileInfo.format === 'xlsx' 
+      ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      : 'text/csv';
+
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${fileInfo.filename}"`);
+    res.setHeader('Content-Length', fileInfo.file_size);
+
+    // Stream the file
+    const fileStream = require('fs').createReadStream(filePath);
+    fileStream.pipe(res);
+
+    fileStream.on('error', (error) => {
+      logger.error('Error streaming file:', error);
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Error downloading file' });
+      }
+    });
+
+    logger.info(`File downloaded: ${fileInfo.filename} (${fileInfo.lead_count} leads)`);
+
+  } catch (error) {
+    logger.error('Error in file download:', error);
+    res.status(500).json({ 
+      error: 'Download failed',
+      message: error.message
+    });
+  }
+});
+
+// Download file endpoint for direct file access
+router.get('/download/direct/:filename', async (req, res) => {
   try {
     const { filename } = req.params;
     

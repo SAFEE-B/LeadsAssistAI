@@ -15,9 +15,35 @@ try {
 }
 
 async function scraperProcessor(job) {
-  const { jobId, queries, clientName } = job.data;
+  const jobData = job.data;
+  const jobId = jobData.jobId || job.id;
   
-  scraperLogger.info(`🎯 PROCESSOR STARTING: Job ${jobId}`, { clientName, queriesCount: queries.length });
+  // Handle different job data structures
+  let queries = [];
+  let clientName = 'Unknown';
+  
+  if (jobData.queries && Array.isArray(jobData.queries)) {
+    // Old format with queries array
+    queries = jobData.queries;
+    clientName = jobData.clientName || 'Unknown';
+  } else if (jobData.businessType && jobData.location) {
+    // New format from conversation API
+    queries = [{
+      businessType: jobData.businessType,
+      query: jobData.query || `${jobData.businessType} in ${jobData.location}`,
+      location: jobData.location,
+      maxResults: jobData.maxResults || 1000
+    }];
+    clientName = 'AI Assistant';
+  } else {
+    throw new Error('Invalid job data structure: missing queries or businessType/location');
+  }
+  
+  scraperLogger.info(`🎯 SCRAPER PROCESSOR STARTING for job ${jobId}`, { 
+    clientName, 
+    queriesCount: queries.length,
+    jobData: jobData
+  });
   
   try {
     // Update job status in database (with fallback)
@@ -79,7 +105,7 @@ async function scraperProcessor(job) {
       job.progress(100);
     }
 
-    scraperLogger.info(`✅ PROCESSOR COMPLETED: Job ${jobId} finished successfully`, { leadsFound: leadsCount });
+    scraperLogger.info(`✅ SCRAPER PROCESSOR COMPLETED: Job ${jobId} finished successfully`, { leadsFound: leadsCount });
     
     return {
       success: true,
@@ -91,7 +117,7 @@ async function scraperProcessor(job) {
     };
 
   } catch (error) {
-    scraperLogger.error(`❌ PROCESSOR FAILED: Job ${jobId}`, { error: error.message });
+    scraperLogger.error(`❌ SCRAPER PROCESSOR FAILED: Job ${jobId}`, { error: error.message, stack: error.stack });
     
     // Update job status in database (with fallback)
     if (runQuery) {

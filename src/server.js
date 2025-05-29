@@ -17,6 +17,7 @@ const filesRoutes = require('./routes/files');
 const statusRoutes = require('./routes/status');
 const conversationRoutes = require('./routes/conversation');
 const deliveryRoutes = require('./routes/delivery');
+const authRoutes = require('./routes/auth');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -33,8 +34,15 @@ app.use(cors({
 // Rate limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
-  message: 'Too many requests from this IP, please try again later.'
+  max: process.env.NODE_ENV === 'production' ? 100 : 1000, // More lenient in development
+  message: 'Too many requests from this IP, please try again later.',
+  skip: (req) => {
+    // Skip rate limiting for localhost in development
+    if (process.env.NODE_ENV === 'development' && req.ip === '::1') {
+      return true;
+    }
+    return false;
+  }
 });
 app.use(limiter);
 
@@ -53,6 +61,7 @@ app.use((req, res, next) => {
 });
 
 // API Routes
+app.use('/api/auth', authRoutes);
 app.use('/api/leads', leadsRoutes);
 app.use('/api/scraper', scraperRoutes);
 app.use('/api/processing', processingRoutes);

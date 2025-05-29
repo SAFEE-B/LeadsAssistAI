@@ -346,42 +346,108 @@ router.get('/recent', async (req, res) => {
   try {
     const { limit = 10 } = req.query;
 
-    const recentDeliveries = await getAll(`
-      SELECT 
-        sj.job_id,
-        sj.client_name,
-        sj.business_types,
-        sj.leads_found,
-        sj.completed_at,
-        pj.output_file,
-        pj.type as processing_type
-      FROM scraping_jobs sj
-      LEFT JOIN processing_jobs pj ON pj.job_id LIKE '%' || sj.job_id || '%'
-      WHERE sj.status = 'completed'
-        AND sj.completed_at >= datetime('now', '-7 days')
-      ORDER BY sj.completed_at DESC
-      LIMIT ?
-    `, [parseInt(limit)]);
+    // First try to get from the new deliveries table (from FileGenerationService)
+    let recentDeliveries = [];
+    try {
+      recentDeliveries = await getAll(`
+        SELECT 
+          id,
+          file_id,
+          filename,
+          format,
+          lead_count,
+          filters,
+          request_type,
+          file_size,
+          status,
+          created_at,
+          downloaded_at,
+          file_path
+        FROM deliveries 
+        WHERE status = 'completed'
+        ORDER BY created_at DESC 
+        LIMIT ?
+      `, [parseInt(limit)]);
 
-    // Add file information
-    const deliveriesWithInfo = await Promise.all(
-      recentDeliveries.map(async (delivery) => {
-        const fileInfo = delivery.output_file ? await getFileInfo(delivery.output_file) : null;
-        return {
-          ...delivery,
-          business_types: delivery.business_types ? JSON.parse(delivery.business_types) : [],
-          fileInfo,
-          downloadUrl: delivery.output_file ? 
-            `/api/delivery/download/${delivery.job_id}/${path.basename(delivery.output_file)}` : null
-        };
-      })
-    );
+      // Format the deliveries for the frontend
+      const formattedDeliveries = recentDeliveries.map(delivery => ({
+        id: delivery.id,
+        fileId: delivery.file_id,
+        clientName: 'AI Assistant', // Since these are AI-generated exports
+        businessTypes: delivery.filters ? 
+          Object.values(JSON.parse(delivery.filters)).filter(v => v && typeof v === 'string') : [],
+        leadsCount: delivery.lead_count,
+        completedAt: delivery.created_at,
+        format: delivery.format,
+        requestType: delivery.request_type,
+        files: [{
+          fileId: delivery.file_id,
+          fileName: delivery.filename,
+          size: delivery.file_size,
+          sizeFormatted: formatFileSize(delivery.file_size),
+          downloadUrl: `/api/files/download/${delivery.file_id}`
+        }],
+        downloadedAt: delivery.downloaded_at
+      }));
 
-    res.json({
-      success: true,
-      deliveries: deliveriesWithInfo,
-      count: deliveriesWithInfo.length
-    });
+      res.json({
+        success: true,
+        deliveries: formattedDeliveries,
+        count: formattedDeliveries.length,
+        source: 'new_system'
+      });
+
+    } catch (deliveriesTableError) {
+      // If deliveries table doesn't exist, fall back to old system
+      console.log('Deliveries table not found, using legacy system:', deliveriesTableError.message);
+      
+      const legacyDeliveries = await getAll(`
+        SELECT 
+          sj.job_id,
+          sj.client_name,
+          sj.business_types,
+          sj.leads_found,
+          sj.completed_at,
+          pj.output_file,
+          pj.type as processing_type
+        FROM scraping_jobs sj
+        LEFT JOIN processing_jobs pj ON pj.job_id LIKE '%' || sj.job_id || '%'
+        WHERE sj.status = 'completed'
+          AND sj.completed_at >= datetime('now', '-7 days')
+        ORDER BY sj.completed_at DESC
+        LIMIT ?
+      `, [parseInt(limit)]);
+
+      // Add file information
+      const deliveriesWithInfo = await Promise.all(
+        legacyDeliveries.map(async (delivery) => {
+          const fileInfo = delivery.output_file ? await getFileInfo(delivery.output_file) : null;
+          return {
+            id: delivery.job_id,
+            clientName: delivery.client_name,
+            businessTypes: delivery.business_types ? JSON.parse(delivery.business_types) : [],
+            leadsCount: delivery.leads_found,
+            completedAt: delivery.completed_at,
+            files: fileInfo ? [{
+              fileName: fileInfo.filename,
+              size: fileInfo.size,
+              sizeFormatted: fileInfo.sizeFormatted,
+              downloadUrl: `/api/delivery/download/${delivery.job_id}/${fileInfo.filename}`
+            }] : [],
+            fileInfo,
+            downloadUrl: delivery.output_file ? 
+              `/api/delivery/download/${delivery.job_id}/${path.basename(delivery.output_file)}` : null
+          };
+        })
+      );
+
+      res.json({
+        success: true,
+        deliveries: deliveriesWithInfo,
+        count: deliveriesWithInfo.length,
+        source: 'legacy_system'
+      });
+    }
 
   } catch (error) {
     logger.error('Error getting recent deliveries:', error);
