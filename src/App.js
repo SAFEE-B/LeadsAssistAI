@@ -12,8 +12,6 @@ import './App.css';
 import Login from './components/Login';
 import Signup from './components/Signup';
 import Chat from './components/Chat';
-import Queue from './components/Queue';
-import Deliveries from './components/Deliveries';
 
 // Basic PrivateRoute component
 const PrivateRoute = ({ children }) => {
@@ -39,20 +37,12 @@ function App() {
         <nav>
           <ul>
             <li>
-              <Link to="/">🏠 Home</Link>
+              <Link to="/">🏠 Dashboard</Link>
             </li>
             {isAuthenticated ? (
-              <>
-                <li>
-                  <Link to="/queue">📊 Queue</Link>
-                </li>
-                <li>
-                  <Link to="/deliveries">📦 Deliveries</Link>
-                </li>
-                <li>
-                  <button onClick={handleLogout}>🚪 Logout</button>
-                </li>
-              </>
+              <li>
+                <button onClick={handleLogout}>🚪 Logout</button>
+              </li>
             ) : (
               <>
                 <li>
@@ -76,22 +66,6 @@ function App() {
               element={
                 <PrivateRoute>
                   <Chat />
-                </PrivateRoute>
-              }
-            />
-            <Route 
-              path="/queue" 
-              element={
-                <PrivateRoute>
-                  <Queue />
-                </PrivateRoute>
-              }
-            />
-            <Route 
-              path="/deliveries" 
-              element={
-                <PrivateRoute>
-                  <Deliveries />
                 </PrivateRoute>
               }
             />

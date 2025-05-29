@@ -2,13 +2,16 @@
 .App {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
 }
 
 nav {
   background-color: #282c34; /* Darker background for nav */
   padding: 10px 0;
   box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  z-index: 10;
+  flex-shrink: 0;
 }
 
 nav ul {
@@ -44,12 +47,20 @@ nav li button {
 }
 
 .App-content {
-  flex-grow: 1; /* Allows content to take up available space */
-  padding: 20px;
-  background-color: #f0f2f5; /* Light grey background for content area */
+  flex: 1;
+  overflow: hidden;
+  background-color: #f8fafc;
   display: flex;
   flex-direction: column;
-  align-items: center; /* Center content horizontally */
+  position: relative;
+}
+
+/* Auth pages styling */
+.App-content:has(.login-container, .signup-container) {
+  padding: 20px;
+  align-items: center;
+  justify-content: center;
+  background-color: #f0f2f5;
 }
 
 /* General Page Title Styling */
