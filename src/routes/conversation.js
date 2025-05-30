@@ -1,7 +1,7 @@
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 const Joi = require('joi');
-const GeminiService = require('../services/geminiService');
+const GeminiServiceClass = require('../services/geminiService');
 const logger = require('../utils/logger');
 
 const router = express.Router();
@@ -12,7 +12,7 @@ const conversationContexts = new Map();
 // Initialize Gemini service
 let geminiService;
 try {
-  geminiService = new GeminiService();
+  geminiService = new GeminiServiceClass();
   logger.info('Gemini service initialized successfully');
 } catch (error) {
   logger.error('Failed to initialize Gemini service:', error);

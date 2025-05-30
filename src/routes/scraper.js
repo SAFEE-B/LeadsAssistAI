@@ -152,17 +152,25 @@ router.get('/jobs', async (req, res) => {
   try {
     const { status, clientName, limit = 50, offset = 0 } = req.query;
 
-    let query = 'SELECT * FROM scraping_jobs WHERE 1=1';
+    let query = 'SELECT * FROM scraping_jobs';
     const params = [];
+    let conditions = [];
 
     if (status) {
-      query += ' AND status = ?';
+      conditions.push('status = ?');
       params.push(status);
+    } else {
+      // If no specific status is requested, default to queued jobs
+      conditions.push("(status = 'pending' OR status = 'waiting' OR status = 'active')");
     }
 
     if (clientName) {
-      query += ' AND client_name LIKE ?';
+      conditions.push('client_name LIKE ?');
       params.push(`%${clientName}%`);
+    }
+
+    if (conditions.length > 0) {
+      query += ' WHERE ' + conditions.join(' AND ');
     }
 
     query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';

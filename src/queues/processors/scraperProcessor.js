@@ -3,6 +3,7 @@ const fs = require('fs').promises;
 const path = require('path');
 const csv = require('csv-parser');
 const { scraperLogger } = require('../../utils/logger');
+const { v4: uuidv4 } = require('uuid');
 
 // Import database functions with error handling
 let runQuery, getOne, getAll;
@@ -13,6 +14,30 @@ try {
   getAll = db.getAll;
 } catch (error) {
   scraperLogger.warn('Database functions not available, using mock operations');
+}
+
+// Helper function to count rows in a CSV file
+async function countCsvRows(filePath) {
+  return new Promise((resolve) => {
+    let count = 0;
+    const readStream = require('fs').createReadStream(filePath);
+
+    readStream.on('error', (err) => {
+        scraperLogger.warn(`Error creating read stream for ${filePath} during count: ${err.message}`);
+        resolve(0); // Resolve with 0 if file can't be read
+    });
+
+    readStream.pipe(csv()) // Use the imported 'csv'
+      .on('data', () => count++)
+      .on('end', () => {
+        scraperLogger.info(`Counted ${count} rows in ${filePath}`);
+        resolve(count);
+      })
+      .on('error', (error) => {
+        scraperLogger.error(`Error parsing CSV for counting rows in ${filePath}: ${error.message}`);
+        resolve(0); // Resolve with 0 if parsing fails
+      });
+  });
 }
 
 async function scraperProcessor(job) {
@@ -92,44 +117,86 @@ async function scraperProcessor(job) {
       
       scraperLogger.info(`📝 Written ${optimizedQueries.length} optimized queries to ${queriesFile}`);
 
-      // Update progress
       if (job.progress) {
         job.progress(20);
-    }
+      }
 
-    // Execute Python scraper script
-    const result = await executePythonScraper(job);
+      // Execute Python scraper script
+      const scraperResult = await executePythonScraper(job);
       
-      // Update progress
       if (job.progress) {
         job.progress(70);
       }
 
       // Process the scraped results
-      newLeadsCount = await processScrapedData(jobId);
       scrapedLeads = await getScrapedLeads();
       
-      scraperLogger.info(`🔍 Scraped ${newLeadsCount} new leads`);
+      // Save newly scraped leads to the database
+      if (scrapedLeads && scrapedLeads.length > 0) {
+        const savedToDbCount = await saveNewLeadsToDatabase(scrapedLeads, jobId);
+        scraperLogger.info(`💾 Attempted to save ${scrapedLeads.length} scraped leads to DB, ${savedToDbCount} succeeded.`);
+      }
+      newLeadsCount = scrapedLeads.length;
+      
+      scraperLogger.info(`🔍 Scraped ${newLeadsCount} new leads from CSV`);
     } else {
       scraperLogger.info(`⚡ Skipping scraping - all requested leads already exist in database`);
     }
     
-    // Update progress
     if (job.progress) {
       job.progress(80);
     }
 
     // 🔄 COMBINE RESULTS: Merge existing + new leads into final output
-    const finalOutputFile = await combineLeadsIntoFinalFile(existingLeads, scrapedLeads, jobData);
-    const totalLeadsCount = existingLeads.length + newLeadsCount;
+    const combinedResults = await combineLeadsIntoFinalFile(existingLeads, scrapedLeads, jobData);
+    const finalOutputFile = combinedResults.filePath;
+    const totalLeadsInOutputFile = combinedResults.count;
+    const approxTotalLeads = existingLeads.length + newLeadsCount;
 
     scraperLogger.info(`📋 Final Results`, {
-      existingLeads: existingLeads.length,
-      newLeads: newLeadsCount,
-      totalLeads: totalLeadsCount,
+      existingLeadsFromInitialCheck: existingLeads.length,
+      newLeadsFromScrape: newLeadsCount,
+      approxTotalLeadsInOutputFile: approxTotalLeads, 
       outputFile: finalOutputFile
     });
     
+    // After finalOutputFile is created, record it in the deliveries table
+    if (finalOutputFile && runQuery) {
+      try {
+        const fileNameOnly = path.basename(finalOutputFile);
+        const absoluteFilePath = path.resolve(finalOutputFile); // Ensure absolute path for consistency
+        const stats = await fs.stat(absoluteFilePath);
+        const fileId = uuidv4();
+        
+        const deliveryFilters = {
+          originalQuery: jobData.query,
+          businessType: jobData.businessType,
+          location: jobData.location,
+          maxResults: jobData.maxResults,
+          jobId: jobId
+        };
+
+        await runQuery(
+          `INSERT INTO deliveries (file_id, filename, format, lead_count, filters, request_type, file_size, file_path, status, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+          [
+            fileId,
+            fileNameOnly,
+            'csv', // Assuming CSV format
+            totalLeadsInOutputFile, // Re-count for accuracy
+            JSON.stringify(deliveryFilters),
+            'scraper_job_output',
+            stats.size,
+            absoluteFilePath, // Store absolute path
+            'completed'
+          ]
+        );
+        scraperLogger.info(`📦 Recorded scraper output file in deliveries: ${fileNameOnly}`);
+      } catch (deliveryError) {
+        scraperLogger.error(`Failed to record scraper output file in deliveries: ${finalOutputFile}`, deliveryError);
+      }
+    }
+
     // Update progress
     if (job.progress) {
       job.progress(90);
@@ -140,7 +207,7 @@ async function scraperProcessor(job) {
       try {
         await runQuery(
           'UPDATE scraping_jobs SET status = ?, completed_at = CURRENT_TIMESTAMP, leads_found = ? WHERE job_id = ?',
-          ['completed', totalLeadsCount, jobId]
+          ['completed', totalLeadsInOutputFile, jobId]
         );
         scraperLogger.info('✅ Updated job status to completed');
       } catch (dbError) {
@@ -154,7 +221,7 @@ async function scraperProcessor(job) {
     }
 
     scraperLogger.info(`✅ SCRAPER PROCESSOR COMPLETED: Job ${jobId} finished successfully`, { 
-      leadsFound: totalLeadsCount,
+      leadsFound: totalLeadsInOutputFile,
       existingLeads: existingLeads.length,
       newLeads: newLeadsCount,
       outputFile: finalOutputFile
@@ -162,7 +229,7 @@ async function scraperProcessor(job) {
     
     return {
       success: true,
-      leadsFound: totalLeadsCount,
+      leadsFound: totalLeadsInOutputFile,
       existingLeads: existingLeads.length,
       newLeads: newLeadsCount,
       message: newLeadsCount > 0 ? 
@@ -338,39 +405,22 @@ async function checkExistingLeadsAndOptimizeQueries(queries) {
   return { optimizedQueries, existingLeads };
 }
 
-// Helper function to parse business types from input
-function parseBusinessTypes(businessTypesString) {
-  if (!businessTypesString) return [];
-  
-  // Split by common delimiters and clean up
-  const types = businessTypesString
-    .split(/[,&+;]|\sand\s|\sor\s/i)
-    .map(type => type.trim())
-    .filter(type => type.length > 0);
-    
-  return types.length > 0 ? types : [businessTypesString];
-}
-
-// Helper function to parse locations from input
-function parseLocations(locationString) {
-  if (!locationString) return [];
-  
-  // Split by commas and clean up
-  const locations = locationString
-    .split(/[,;]/)
-    .map(loc => loc.trim())
-    .filter(loc => loc.length > 0);
-    
-  return locations.length > 0 ? locations : [locationString];
-}
-
 // Check existing leads for a specific business type and location
 async function checkExistingLeadsForLocation(businessType, location) {
   if (!getAll) return [];
   
   try {
+    // Parse business types into array
+    const businessTypes = parseBusinessTypes(businessType);
+    scraperLogger.info(`🔍 Searching for business types: ${JSON.stringify(businessTypes)} in location: ${location}`);
+
+    // Build dynamic SQL conditions for business types
+    const businessTypeConditions = businessTypes.map(type => 
+      `(LOWER(type_of_business) LIKE LOWER(?) OR LOWER(sub_category) LIKE LOWER(?))`
+    ).join(' OR ');
+
     // Query database for existing leads
-    const leads = await getAll(`
+    const query = `
       SELECT 
         name_of_business,
         type_of_business,
@@ -386,24 +436,71 @@ async function checkExistingLeadsForLocation(businessType, location) {
         city
       FROM leads 
       WHERE 
-        (LOWER(type_of_business) LIKE LOWER(?) OR LOWER(sub_category) LIKE LOWER(?))
+        (${businessTypeConditions})
         AND (
           LOWER(business_address) LIKE LOWER(?) 
           OR LOWER(zip_code) = LOWER(?)
           OR LOWER(city) LIKE LOWER(?)
           OR LOWER(state) LIKE LOWER(?)
         )
-    `, [
-      `%${businessType}%`, `%${businessType}%`,
-      `%${location}%`, location, `%${location}%`, `%${location}%`
-    ]);
+    `;
+
+    // Prepare parameters array
+    const params = [
+      ...businessTypes.flatMap(type => [`%${type}%`, `%${type}%`]),
+      `%${location}%`, 
+      location, 
+      `%${location}%`, 
+      `%${location}%`
+    ];
+
+    scraperLogger.info(`🔍 Executing query with params: ${JSON.stringify(params)}`);
+    
+    const leads = await getAll(query, params);
+    
+    scraperLogger.info(`📊 Found ${leads?.length || 0} leads for business types: ${JSON.stringify(businessTypes)} in location: ${location}`);
     
     return leads || [];
     
   } catch (error) {
-    scraperLogger.warn(`Error checking existing leads for ${businessType} in ${location}:`, error.message);
+    scraperLogger.error(`❌ Error checking existing leads for ${businessType} in ${location}:`, error.message);
+    scraperLogger.error(`Stack trace:`, error.stack);
     return [];
   }
+}
+
+// Helper function to parse business types from input
+function parseBusinessTypes(businessTypesString) {
+  if (!businessTypesString) return [];
+  
+  // First split by commas, then handle conjunctions
+  const types = businessTypesString
+    .split(',')
+    .map(type => type.trim())
+    .flatMap(type => {
+      // Split by common conjunctions
+      return type
+        .split(/\s+(?:and|&|or|\+)\s+/i)
+        .map(t => t.trim())
+        .filter(t => t.length > 0);
+    })
+    .filter(type => type.length > 0);
+    
+  scraperLogger.info(`🔧 Parsed business types: ${JSON.stringify(types)}`);
+  return types.length > 0 ? types : [businessTypesString];
+}
+
+// Helper function to parse locations from input
+function parseLocations(locationString) {
+  if (!locationString) return [];
+  
+  // Split by commas and clean up
+  const locations = locationString
+    .split(/[,;]/)
+    .map(loc => loc.trim())
+    .filter(loc => loc.length > 0);
+    
+  return locations.length > 0 ? locations : [locationString];
 }
 
 // Get scraped leads from the output file
@@ -450,42 +547,66 @@ async function combineLeadsIntoFinalFile(existingLeads, newLeads, jobData) {
   const outputFile = `./Files/Deliveries/combined_leads_${timestamp}.csv`;
   
   try {
-    // Ensure output directory exists
     const outputDir = path.dirname(outputFile);
     await fs.mkdir(outputDir, { recursive: true });
 
-    // Standardize field names for consistency
-    const standardizeFields = (lead) => ({
-      'Type of Business': lead['Type of Business'] || lead.type_of_business || '',
-      'Sub-Category': lead['Sub-Category'] || lead.sub_category || '',
-      'Name of Business': lead['Name of Business'] || lead.name_of_business || '',
-      'Website': lead['Website'] || lead.website || '',
-      '# of Reviews': lead['# of Reviews'] || lead.num_reviews || '',
-      'Rating': lead['Rating'] || lead.rating || '',
-      'Latest Review Date': lead['Latest Review Date'] || lead.latest_review || '',
-      'Business Address': lead['Business Address'] || lead.business_address || '',
-      'Phone Number': lead['Phone Number'] || lead.phone_number || ''
+    const allLeadsMap = new Map();
+
+    // Process existing leads
+    existingLeads.forEach(lead => {
+      const key = `${lead.name_of_business || lead['Name of Business']}_${lead.phone_number || lead['Phone Number']}`.toLowerCase();
+      const sourceFile = lead.source_file || lead['Source File'] || '';
+      let isNamedFile = sourceFile && !sourceFile.toLowerCase().startsWith('default');
+      
+      if (!allLeadsMap.has(key)) {
+        allLeadsMap.set(key, { 
+          leadData: { ...lead }, 
+          namedSources: isNamedFile ? [sourceFile] : [] // Initialize as array if named, else empty array
+        });
+      } else {
+        const existingEntry = allLeadsMap.get(key);
+        if (isNamedFile && !existingEntry.namedSources.includes(sourceFile)) {
+          existingEntry.namedSources.push(sourceFile);
+        }
+      }
     });
 
-    // Combine and standardize all leads
-    const allLeads = [
-      ...existingLeads.map(standardizeFields),
-      ...newLeads.map(standardizeFields)
-    ];
-
-    // Remove duplicates based on business name + phone number
-    const uniqueLeads = [];
-    const seen = new Set();
-    
-    for (const lead of allLeads) {
+    // Process new leads
+    newLeads.forEach(lead => {
       const key = `${lead['Name of Business']}_${lead['Phone Number']}`.toLowerCase();
-      if (!seen.has(key)) {
-        seen.add(key);
-        uniqueLeads.push(lead);
+      if (!allLeadsMap.has(key)) {
+        allLeadsMap.set(key, { 
+          leadData: { ...lead }, 
+          namedSources: [] // New leads don't have pre-existing named sources
+        });
       }
+      // If the lead was already in allLeadsMap, its namedSources list is preserved.
+    });
+
+    const finalLeadsArray = [];
+    for (const [, { leadData, namedSources }] of allLeadsMap) {
+      let finalSource;
+      if (namedSources && namedSources.length > 0) {
+        finalSource = namedSources.join(', '); // Join multiple named sources
+      } else {
+        finalSource = 'Not in any list';
+      }
+      
+      const standardizedLead = {
+        'Type of Business': leadData['Type of Business'] || leadData.type_of_business || '',
+        'Sub-Category': leadData['Sub-Category'] || leadData.sub_category || '',
+        'Name of Business': leadData['Name of Business'] || leadData.name_of_business || '',
+        'Website': leadData['Website'] || leadData.website || '',
+        '# of Reviews': leadData['# of Reviews'] || leadData.num_reviews || '',
+        'Rating': leadData['Rating'] || leadData.rating || '',
+        'Latest Review Date': leadData['Latest Review Date'] || leadData.latest_review || '',
+        'Business Address': leadData['Business Address'] || leadData.business_address || '',
+        'Phone Number': leadData['Phone Number'] || leadData.phone_number || '',
+        'Source File': finalSource
+      };
+      finalLeadsArray.push(standardizedLead);
     }
 
-    // Write to CSV
     const csvWriterFactory = require('csv-writer');
     const csvWriter = csvWriterFactory.createObjectCsvWriter({
       path: outputFile,
@@ -498,20 +619,21 @@ async function combineLeadsIntoFinalFile(existingLeads, newLeads, jobData) {
         { id: 'Rating', title: 'Rating' },
         { id: 'Latest Review Date', title: 'Latest Review Date' },
         { id: 'Business Address', title: 'Business Address' },
-        { id: 'Phone Number', title: 'Phone Number' }
+        { id: 'Phone Number', title: 'Phone Number' },
+        { id: 'Source File', title: 'Source File' } // Added Source File to header
       ]
     });
 
-    await csvWriter.writeRecords(uniqueLeads);
+    await csvWriter.writeRecords(finalLeadsArray);
     
     scraperLogger.info(`📄 Combined results written to ${outputFile}`, {
-      totalLeads: uniqueLeads.length,
-      existingLeads: existingLeads.length,
-      newLeads: newLeads.length,
-      duplicatesRemoved: allLeads.length - uniqueLeads.length
+      totalLeads: finalLeadsArray.length,
+      // Note: existingLeads.length and newLeads.length here are the input counts, not post-deduplication
+      initialExistingLeads: existingLeads.length,
+      initialNewLeads: newLeads.length,
     });
 
-    return outputFile;
+    return { filePath: outputFile, count: finalLeadsArray.length };
 
   } catch (error) {
     scraperLogger.error('Error combining leads into final file:', error);
@@ -523,8 +645,79 @@ async function combineLeadsIntoFinalFile(existingLeads, newLeads, jobData) {
         fallbackScraperOutputFile = path.join(process.cwd(), './Outputs/LeadsApart.csv');
     }
     scraperLogger.info(`Fallback: returning original scraper output path: ${fallbackScraperOutputFile}`);
-    return fallbackScraperOutputFile;
+    
+    let fallbackCount = 0;
+    try {
+      await fs.access(fallbackScraperOutputFile); // Check existence and permissions
+      // If fs.access is successful, then try to count
+      fallbackCount = await countCsvRows(fallbackScraperOutputFile);
+    } catch (accessOrCountError) {
+      scraperLogger.warn(`Could not access or count rows in fallback file ${fallbackScraperOutputFile}: ${accessOrCountError.message}. Using count 0.`);
+      fallbackCount = 0; // Ensure it's 0 if any error in try block
+    }
+    return { filePath: fallbackScraperOutputFile, count: fallbackCount };
   }
+}
+
+async function saveNewLeadsToDatabase(leads, jobId) {
+  if (!runQuery || !leads || leads.length === 0) {
+    scraperLogger.info('No new leads to save to database or DB function not available.');
+    return 0;
+  }
+
+  let savedCount = 0;
+  const dbSourceFile = `Scraped by Job ${jobId} - ${new Date().toLocaleDateString()}`;
+
+  for (const lead of leads) {
+    const leadDataForDb = {
+      name_of_business: lead['Name of Business'] || lead.name_of_business,
+      type_of_business: lead['Type of Business'] || lead.type_of_business,
+      sub_category: lead['Sub-Category'] || lead.sub_category,
+      website: lead['Website'] || lead.website,
+      num_reviews: parseInt(lead['# of Reviews'] || lead.num_reviews, 10) || 0,
+      rating: parseFloat(lead['Rating'] || lead.rating) || null,
+      latest_review: lead['Latest Review Date'] || lead.latest_review,
+      business_address: lead['Business Address'] || lead.business_address,
+      phone_number: lead['Phone Number'] || lead.phone_number,
+      email: lead['Email'] || lead.email, 
+      notes: lead['Notes'] || lead.notes,   
+      source_file: dbSourceFile,
+      zip_code: lead['Zip Code'] || lead.zip_code, 
+      state: lead['State'] || lead.state,       
+      city: lead['City'] || lead.city,
+      updated_at: new Date().toISOString() // Explicitly set updated_at
+    };
+
+    if (!leadDataForDb.name_of_business || !leadDataForDb.phone_number) {
+      scraperLogger.warn('Skipping lead due to missing name or phone for DB insert:', JSON.stringify(lead));
+      continue;
+    }
+
+    const query = `
+      INSERT OR REPLACE INTO leads (
+        name_of_business, type_of_business, sub_category, website, num_reviews, rating,
+        latest_review, business_address, phone_number, email, notes, source_file,
+        zip_code, state, city, updated_at 
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `; 
+
+    const params = [
+      leadDataForDb.name_of_business, leadDataForDb.type_of_business, leadDataForDb.sub_category,
+      leadDataForDb.website, leadDataForDb.num_reviews, leadDataForDb.rating,
+      leadDataForDb.latest_review, leadDataForDb.business_address, leadDataForDb.phone_number,
+      leadDataForDb.email, leadDataForDb.notes, leadDataForDb.source_file,
+      leadDataForDb.zip_code, leadDataForDb.state, leadDataForDb.city, leadDataForDb.updated_at
+    ];
+
+    try {
+      await runQuery(query, params);
+      savedCount++;
+    } catch (dbError) {
+      scraperLogger.error(`Failed to save lead to database: ${leadDataForDb.name_of_business}`, { error: dbError.message, leadData: leadDataForDb });
+    }
+  }
+  scraperLogger.info(`✅ Saved ${savedCount} out of ${leads.length} newly scraped leads to the database.`);
+  return savedCount;
 }
 
 module.exports = scraperProcessor; 

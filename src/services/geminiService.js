@@ -3,6 +3,27 @@ const { getAll, getOne, runQuery } = require('../database/setup');
 const { addScrapingJob, addProcessingJob, getQueueStats } = require('../queues/setup');
 const FileGenerationService = require('./fileGenerationService');
 const logger = require('../utils/logger');
+const { v4: uuidv4 } = require('uuid');
+
+// Helper function (similar to scraperProcessor.js - consider moving to a shared utils file)
+function parseBusinessTypes(businessTypesString) {
+  if (!businessTypesString) return [];
+  const types = businessTypesString
+    .split(',')
+    .map(type => type.trim())
+    .flatMap(type => type.split(/\s+(?:and|&|or|\+)\s+/i).map(t => t.trim()).filter(t => t.length > 0))
+    .filter(type => type.length > 0);
+  return types.length > 0 ? types : (businessTypesString ? [businessTypesString] : []);
+}
+
+function parseLocations(locationString) {
+  if (!locationString) return [];
+  const locations = locationString
+    .split(',')
+    .map(loc => loc.trim())
+    .filter(loc => loc.length > 0);
+  return locations.length > 0 ? locations : (locationString ? [locationString] : []);
+}
 
 class GeminiService {
   constructor() {
@@ -504,7 +525,6 @@ class GeminiService {
   async exportLeadsToFile(args) {
     const { city, state, zipCode, businessType, format = 'csv', filename, maxResults = 10000 } = args;
     
-    // Safety check
     const safeMaxResults = Math.min(maxResults, 50000);
     
     let query = 'SELECT * FROM leads WHERE 1=1';
@@ -517,17 +537,35 @@ class GeminiService {
     if (state) {
       query = this.buildStateCondition(state, query, params);
     }
+
+    // Handle multiple Zip Codes
     if (zipCode) {
-      query += ' AND zip_code = ?';
-      params.push(zipCode);
+      const zipCodesArray = parseLocations(zipCode);
+      if (zipCodesArray.length > 0) {
+        query += ` AND zip_code IN (${zipCodesArray.map(() => '?').join(',')})`;
+        params.push(...zipCodesArray);
+      }
     }
+
+    // Handle multiple Business Types
     if (businessType) {
-      query += ' AND LOWER(type_of_business) LIKE LOWER(?)';
-      params.push(`%${businessType}%`);
+      const businessTypesArray = parseBusinessTypes(businessType);
+      if (businessTypesArray.length > 0) {
+        const businessTypeConditions = businessTypesArray
+          .map(() => '(LOWER(type_of_business) LIKE LOWER(?) OR LOWER(sub_category) LIKE LOWER(?))')
+          .join(' OR ');
+        query += ` AND (${businessTypeConditions})`;
+        businessTypesArray.forEach(bt => {
+          params.push(`%${bt}%`);
+          params.push(`%${bt}%`);
+        });
+      }
     }
 
     query += ' ORDER BY created_at DESC LIMIT ?';
     params.push(safeMaxResults);
+
+    logger.info(`Executing export query: ${query} with params: ${JSON.stringify(params)}`);
 
     const leads = await getAll(query, params);
     
@@ -647,6 +685,87 @@ Be helpful, concise, and use tools when appropriate. Always confirm actions befo
       throw new Error(`Gemini API error: ${error.message}`);
     }
   }
+
+  async getScrapingJobStatus(jobId) {
+    if (!jobId) {
+      throw new Error('Job ID is required to get scraping status.');
+    }
+    try {
+      const job = await scraperQueue.getJob(jobId);
+      if (!job) {
+        // Check database if not in Bull queue (e.g., completed or failed long ago)
+        const dbJob = await getOne('SELECT * FROM scraping_jobs WHERE job_id = ?', [jobId]);
+        if (dbJob) {
+          return {
+            job_id: dbJob.job_id,
+            status: dbJob.status,
+            progress: dbJob.status === 'completed' || dbJob.status === 'failed' ? 100 : 0,
+            data: JSON.parse(dbJob.job_data || '{}'), // Ensure job_data is parsed
+            created_at: dbJob.created_at,
+            started_at: dbJob.started_at,
+            completed_at: dbJob.completed_at,
+            error_message: dbJob.error_message,
+            leads_found: dbJob.leads_found,
+            source: dbJob.source,
+            result: dbJob.result ? JSON.parse(dbJob.result) : null // Ensure result is parsed
+          };
+        } else {
+          return { status: 'not_found', message: `Job ${jobId} not found in queue or database.` };
+        }
+      }
+      
+      // For jobs found in Bull queue
+      const jobData = job.data;
+      const jobResult = job.returnvalue; // Bull stores job result in returnvalue
+      
+      return {
+        job_id: job.id,
+        name: job.name,
+        status: await job.getState(),
+        progress: job.progress(),
+        data: jobData,
+        created_at: new Date(job.timestamp).toISOString(),
+        processed_on: job.processedOn ? new Date(job.processedOn).toISOString() : null,
+        finished_on: job.finishedOn ? new Date(job.finishedOn).toISOString() : null,
+        failed_reason: job.failedReason,
+        result: jobResult, // Already an object, no need to parse
+        opts: job.opts
+      };
+    } catch (error) {
+      logger.error(`Error fetching job ${jobId} status:`, error);
+      throw new Error(`Could not fetch status for job ${jobId}: ${error.message}`);
+    }
+  }
+
+  async listRecentDeliveries(limit = 10) {
+    try {
+      const deliveries = await getAll(
+        'SELECT * FROM deliveries ORDER BY created_at DESC LIMIT ?',
+        [limit]
+      );
+      return deliveries.map(d => ({ ...d, filters: JSON.parse(d.filters || '{}') }));
+    } catch (error) {
+      logger.error('Error listing recent deliveries:', error);
+      return [];
+    }
+  }
+
+  async getDeliveryFile(fileId) {
+    try {
+      const delivery = await getOne(
+        'SELECT * FROM deliveries WHERE file_id = ?',
+        [fileId]
+      );
+      if (!delivery) {
+        return null;
+      }
+      return { ...delivery, filters: JSON.parse(delivery.filters || '{}') };
+    } catch (error) {
+      logger.error(`Error fetching delivery file ${fileId}:`, error);
+      return null;
+    }
+  }
 }
 
+// module.exports = new GeminiService();
 module.exports = GeminiService; 
