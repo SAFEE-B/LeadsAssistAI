@@ -149,6 +149,9 @@ const Chat = () => {
   };
 
   const getFileIcon = (fileName) => {
+    if (!fileName || typeof fileName !== 'string') {
+      return '📄'; // Default icon for invalid filenames
+    }
     const extension = fileName.split('.').pop().toLowerCase();
     switch (extension) {
       case 'xlsx':
@@ -486,10 +489,10 @@ const Chat = () => {
                         <button
                           key={index}
                           className="download-button-mini"
-                          onClick={() => handleDownload(file.fileId, file.fileName)}
-                          title={`Download ${file.fileName}`}
+                          onClick={() => handleDownload(file.id, file.name)}
+                          title={`Download ${file.name}`}
                         >
-                          {getFileIcon(file.fileName)} {file.fileName.substring(0, 20)}...
+                          {getFileIcon(file.name)} {file.name.substring(0, 20)}...
                         </button>
                       ))}
                     </div>
