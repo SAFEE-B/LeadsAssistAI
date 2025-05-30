@@ -5,21 +5,64 @@
   background: #f8fafc;
   gap: 20px;
   padding: 20px;
+  padding-top: 70px; /* Increased to account for external navbar */
+  box-sizing: border-box; /* Ensure padding doesn't add to height/width */
+}
+
+.left-sidebar, .right-sidebar {
+  width: 280px; /* Adjust as needed */
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  overflow-y: auto;
+  height: calc(100vh - 40px - 70px); /* Account for dashboard padding AND navbar */
+  padding-bottom: 20px; /* Add some space at the bottom if content is long */
+  box-sizing: border-box;
+}
+
+/* Custom scrollbar for sidebars - Optional */
+.left-sidebar::-webkit-scrollbar, .right-sidebar::-webkit-scrollbar {
+  width: 6px;
+}
+.left-sidebar::-webkit-scrollbar-thumb, .right-sidebar::-webkit-scrollbar-thumb {
+  background-color: #ccc;
+  border-radius: 3px;
+}
+.left-sidebar::-webkit-scrollbar-track, .right-sidebar::-webkit-scrollbar-track {
+  background-color: #f1f1f1;
 }
 
 .main-content {
   flex: 1;
   display: flex;
   flex-direction: column;
-  max-width: calc(100% - 320px);
+  /* max-width: calc(100% - 320px); remove this as we have two sidebars now */
+  height: calc(100vh - 40px - 70px); /* Account for dashboard padding AND navbar */
+  box-sizing: border-box;
 }
 
 .sidebar {
-  width: 300px;
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-  overflow-y: auto;
+  /* This class is no longer used for the main layout, repurposed to right-sidebar */
+  /* width: 300px; */
+  /* display: flex; */
+  /* flex-direction: column; */
+  /* gap: 20px; */
+  /* overflow-y: auto; */
+}
+
+.left-sidebar .sidebar-section,
+.right-sidebar .sidebar-section {
+  display: flex; /* Allow children to flex */
+  flex-direction: column; /* Stack children vertically */
+  flex-grow: 1; /* Allow section to grow if space available (especially for deliveries) */
+  min-height: 0; /* Important for flex children to shrink properly */
+}
+
+/* Ensure deliveries list can grow within its flexible parent */
+.right-sidebar .sidebar-section .deliveries-list {
+  flex-grow: 1; /* Allow deliveries list to take available space */
+  /* max-height: none; */ /* Override previous max-height if we want it to fill */
+   /* Keep max-height if we still want a limit but allow parent to be flexible */
 }
 
 .sidebar-section {
@@ -320,6 +363,8 @@
 
 .queue-stats {
   padding: 15px 20px;
+  /* Example: Increase padding for more space */
+  padding: 20px 25px;
 }
 
 .stat-mini {
@@ -333,7 +378,7 @@
 .stat-label {
   font-weight: 600;
   color: #374151;
-  font-size: 13px;
+  font-size: 14px;
   margin-bottom: 6px;
 }
 
@@ -344,7 +389,7 @@
 }
 
 .stat-values span {
-  font-size: 12px;
+  font-size: 13px;
   padding: 3px 8px;
   border-radius: 12px;
   font-weight: 500;
@@ -389,6 +434,21 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  overflow-y: auto;
+  flex-grow: 1;
+  min-height: 0;
+}
+
+/* Custom scrollbar for jobs-list-mini */
+.jobs-list-mini::-webkit-scrollbar {
+  width: 6px;
+}
+.jobs-list-mini::-webkit-scrollbar-thumb {
+  background-color: #ccc;
+  border-radius: 3px;
+}
+.jobs-list-mini::-webkit-scrollbar-track {
+  background-color: #f1f1f1;
 }
 
 .job-mini {
@@ -432,6 +492,21 @@
 /* Deliveries Styles */
 .deliveries-list {
   padding: 15px 20px 20px 20px;
+  overflow-y: auto;
+  flex-grow: 1;
+  min-height: 0;
+}
+
+/* Custom scrollbar for deliveries-list */
+.deliveries-list::-webkit-scrollbar {
+  width: 6px;
+}
+.deliveries-list::-webkit-scrollbar-thumb {
+  background-color: #ccc;
+  border-radius: 3px;
+}
+.deliveries-list::-webkit-scrollbar-track {
+  background-color: #f1f1f1;
 }
 
 .no-deliveries-mini {

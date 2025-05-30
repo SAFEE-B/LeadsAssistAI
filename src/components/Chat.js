@@ -284,7 +284,76 @@ const Chat = () => {
 
   return (
     <div className="dashboard-container">
-      {/* Main Content Area */}
+      {/* Left Sidebar for Queue Status */}
+      <div className="left-sidebar">
+        {/* Queue Section */}
+        <div className="sidebar-section">
+          <div className="section-header">
+            <h3>📊 Queue Status</h3>
+            <button 
+              onClick={fetchQueueData} 
+              disabled={queueLoading}
+              className="refresh-button-small"
+              title="Refresh queue data"
+            >
+              🔄
+            </button>
+          </div>
+
+          {queueError && (
+            <div className="error-banner-small">
+              ⚠️ {queueError}
+            </div>
+          )}
+
+          {queueStats && (
+            <div className="queue-stats">
+              <div className="stat-mini">
+                <div className="stat-label">Scraper Queue</div>
+                <div className="stat-values">
+                  <span className="waiting">⏳ {queueStats.scraper?.waiting || 0}</span>
+                  <span className="active">⚡ {queueStats.scraper?.active || 0}</span>
+                  <span className="completed">✅ {queueStats.scraper?.completed || 0}</span>
+                </div>
+              </div>
+              
+              <div className="stat-mini">
+                <div className="stat-label">Processing Queue</div>
+                <div className="stat-values">
+                  <span className="waiting">⏳ {queueStats.processing?.waiting || 0}</span>
+                  <span className="active">⚡ {queueStats.processing?.active || 0}</span>
+                  <span className="completed">✅ {queueStats.processing?.completed || 0}</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Recent Jobs */}
+          <div className="recent-jobs">
+            <h4>Jobs in Queue</h4>
+            {activeJobs.length === 0 ? (
+              <div className="no-jobs-mini">No recent jobs</div>
+            ) : (
+              <div className="jobs-list-mini">
+                {activeJobs.map((job) => (
+                  <div key={job.id || job.jobId} className="job-mini">
+                    <div className="job-status-mini">
+                      <span className="status-icon">{getStatusIcon(job.status)}</span>
+                      <span className="job-id">#{job.id || job.jobId}</span>
+                    </div>
+                    <div className="job-info-mini">
+                      <div>{job.businessTypes?.join(', ') || 'N/A'}</div>
+                      <div className="job-date-mini">{formatDate(job.createdAt || job.timestamp)}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Main Content Area (Chat) */}
       <div className="main-content">
         {/* Chat Section */}
         <div className="chat-container">
@@ -373,74 +442,8 @@ const Chat = () => {
         </div>
       </div>
 
-      {/* Sidebar with Queue and Deliveries */}
-      <div className="sidebar">
-        {/* Queue Section */}
-        <div className="sidebar-section">
-          <div className="section-header">
-            <h3>📊 Queue Status</h3>
-            <button 
-              onClick={fetchQueueData} 
-              disabled={queueLoading}
-              className="refresh-button-small"
-              title="Refresh queue data"
-            >
-              🔄
-            </button>
-          </div>
-
-          {queueError && (
-            <div className="error-banner-small">
-              ⚠️ {queueError}
-            </div>
-          )}
-
-          {queueStats && (
-            <div className="queue-stats">
-              <div className="stat-mini">
-                <div className="stat-label">Scraper Queue</div>
-                <div className="stat-values">
-                  <span className="waiting">⏳ {queueStats.scraperQueue?.waiting || 0}</span>
-                  <span className="active">⚡ {queueStats.scraperQueue?.active || 0}</span>
-                  <span className="completed">✅ {queueStats.scraperQueue?.completed || 0}</span>
-                </div>
-              </div>
-              
-              <div className="stat-mini">
-                <div className="stat-label">Processing Queue</div>
-                <div className="stat-values">
-                  <span className="waiting">⏳ {queueStats.processingQueue?.waiting || 0}</span>
-                  <span className="active">⚡ {queueStats.processingQueue?.active || 0}</span>
-                  <span className="completed">✅ {queueStats.processingQueue?.completed || 0}</span>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Recent Jobs */}
-          <div className="recent-jobs">
-            <h4>Recent Jobs</h4>
-            {activeJobs.length === 0 ? (
-              <div className="no-jobs-mini">No recent jobs</div>
-            ) : (
-              <div className="jobs-list-mini">
-                {activeJobs.slice(0, 3).map((job) => (
-                  <div key={job.id || job.jobId} className="job-mini">
-                    <div className="job-status-mini">
-                      <span className="status-icon">{getStatusIcon(job.status)}</span>
-                      <span className="job-id">#{job.id || job.jobId}</span>
-                    </div>
-                    <div className="job-info-mini">
-                      <div>{job.businessTypes?.join(', ') || 'N/A'}</div>
-                      <div className="job-date-mini">{formatDate(job.createdAt || job.timestamp)}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-
+      {/* Right Sidebar for Deliveries */}
+      <div className="right-sidebar">
         {/* Deliveries Section */}
         <div className="sidebar-section">
           <div className="section-header">

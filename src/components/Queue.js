@@ -108,19 +108,19 @@ const Queue = () => {
             <div className="stat-details">
               <div className="stat-item">
                 <span>Waiting:</span>
-                <span className="stat-value">{queueStats.scraperQueue?.waiting || 0}</span>
+                <span className="stat-value">{queueStats.scraper?.waiting || 0}</span>
               </div>
               <div className="stat-item">
                 <span>Active:</span>
-                <span className="stat-value">{queueStats.scraperQueue?.active || 0}</span>
+                <span className="stat-value">{queueStats.scraper?.active || 0}</span>
               </div>
               <div className="stat-item">
                 <span>Completed:</span>
-                <span className="stat-value">{queueStats.scraperQueue?.completed || 0}</span>
+                <span className="stat-value">{queueStats.scraper?.completed || 0}</span>
               </div>
               <div className="stat-item">
                 <span>Failed:</span>
-                <span className="stat-value">{queueStats.scraperQueue?.failed || 0}</span>
+                <span className="stat-value">{queueStats.scraper?.failed || 0}</span>
               </div>
             </div>
           </div>
@@ -130,19 +130,19 @@ const Queue = () => {
             <div className="stat-details">
               <div className="stat-item">
                 <span>Waiting:</span>
-                <span className="stat-value">{queueStats.processingQueue?.waiting || 0}</span>
+                <span className="stat-value">{queueStats.processing?.waiting || 0}</span>
               </div>
               <div className="stat-item">
                 <span>Active:</span>
-                <span className="stat-value">{queueStats.processingQueue?.active || 0}</span>
+                <span className="stat-value">{queueStats.processing?.active || 0}</span>
               </div>
               <div className="stat-item">
                 <span>Completed:</span>
-                <span className="stat-value">{queueStats.processingQueue?.completed || 0}</span>
+                <span className="stat-value">{queueStats.processing?.completed || 0}</span>
               </div>
               <div className="stat-item">
                 <span>Failed:</span>
-                <span className="stat-value">{queueStats.processingQueue?.failed || 0}</span>
+                <span className="stat-value">{queueStats.processing?.failed || 0}</span>
               </div>
             </div>
           </div>
