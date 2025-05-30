@@ -59,7 +59,7 @@ const Chat = () => {
     try {
       // Fetch queue statistics
       const statsResponse = await axios.get('/api/status/queues');
-      setQueueStats(statsResponse.data);
+      setQueueStats(statsResponse.data.queueStats);
       
       // Fetch active jobs
       const jobsResponse = await axios.get('/api/scraper/jobs');
@@ -114,6 +114,7 @@ const Chat = () => {
     switch (status) {
       case 'completed': return '#10b981';
       case 'active': return '#f59e0b';
+      case 'processing': return '#f59e0b'; // Same as active
       case 'waiting': return '#6b7280';
       case 'failed': return '#ef4444';
       default: return '#6b7280';
@@ -124,6 +125,7 @@ const Chat = () => {
     switch (status) {
       case 'completed': return '✅';
       case 'active': return '⚡';
+      case 'processing': return '⚙️'; // Different icon for processing
       case 'waiting': return '⏳';
       case 'failed': return '❌';
       default: return '❓';
@@ -345,7 +347,7 @@ const Chat = () => {
                       <span className="job-id">#{job.id || job.jobId}</span>
                     </div>
                     <div className="job-info-mini">
-                      <div>{job.businessTypes?.join(', ') || 'N/A'}</div>
+                      <div>{job.business_types?.join(', ') || 'N/A'}</div>
                       <div className="job-date-mini">{formatDate(job.createdAt || job.timestamp)}</div>
                     </div>
                   </div>
