@@ -370,25 +370,30 @@ router.get('/recent', async (req, res) => {
       `, [parseInt(limit)]);
 
       // Format the deliveries for the frontend
-      const formattedDeliveries = recentDeliveries.map(delivery => ({
-        id: delivery.id,
-        fileId: delivery.file_id,
-        clientName: 'AI Assistant', // Since these are AI-generated exports
-        businessTypes: delivery.filters ? 
-          Object.values(JSON.parse(delivery.filters)).filter(v => v && typeof v === 'string') : [],
-        leadsCount: delivery.lead_count,
-        completedAt: delivery.created_at,
-        format: delivery.format,
-        requestType: delivery.request_type,
-        files: [{
+      const formattedDeliveries = recentDeliveries.map(delivery => {
+        const filters = delivery.filters ? JSON.parse(delivery.filters) : {};
+        
+        return {
+          id: delivery.id,
           fileId: delivery.file_id,
-          fileName: delivery.filename,
-          size: delivery.file_size,
-          sizeFormatted: formatFileSize(delivery.file_size),
-          downloadUrl: `/api/files/download/${delivery.file_id}`
-        }],
-        downloadedAt: delivery.downloaded_at
-      }));
+          clientName: filters.clientName || 'Scraper Job', // Extract client name from filters
+          businessTypes: filters.businessType ? [filters.businessType] : [], // Extract business type from filters
+          zipCodes: filters.location ? [filters.location] : [], // Extract location from filters
+          leadsCount: delivery.lead_count,
+          completedAt: delivery.created_at,
+          format: delivery.format,
+          requestType: delivery.request_type,
+          jobId: filters.jobId || 'N/A', // Extract job ID from filters
+          files: [{
+            id: delivery.file_id,
+            name: delivery.filename,
+            size: delivery.file_size,
+            type: delivery.format,
+            downloadUrl: `/api/files/download/${delivery.file_id}`
+          }],
+          downloadedAt: delivery.downloaded_at
+        };
+      });
 
       res.json({
         success: true,

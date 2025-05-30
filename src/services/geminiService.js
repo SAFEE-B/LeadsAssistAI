@@ -399,18 +399,43 @@ class GeminiService {
     if (state) {
       query = this.buildStateCondition(state, query, params);
     }
+    
+    // Handle multiple Zip Codes
     if (zipCode) {
-      query += ' AND zip_code = ?';
-      params.push(zipCode);
+      let zipCodesArray = parseLocations(zipCode); // Raw parsed locations
+      // Clean each item to be a 5-digit zip code
+      zipCodesArray = zipCodesArray.map(zc => {
+        const digits = zc.replace(/[^0-9]/g, ''); // Extract all digits
+        if (digits.length >= 5) return digits.slice(-5); // Take last 5 digits
+        return null;
+      }).filter(zc => zc !== null && zc.length === 5); // Ensure they are valid 5-digit zips
+
+      if (zipCodesArray.length > 0) {
+        query += ` AND SUBSTR(REPLACE(zip_code, ' ', ''), -5) IN (${zipCodesArray.map(() => '?').join(',')})`;
+        params.push(...zipCodesArray);
+      }
     }
+
+    // Handle multiple Business Types
     if (businessType) {
-      query += ' AND LOWER(type_of_business) LIKE LOWER(?)';
-      params.push(`%${businessType}%`);
+      const businessTypesArray = parseBusinessTypes(businessType);
+      if (businessTypesArray.length > 0) {
+        const businessTypeConditions = businessTypesArray
+          .map(() => '(LOWER(type_of_business) LIKE LOWER(?) OR LOWER(sub_category) LIKE LOWER(?))')
+          .join(' OR ');
+        query += ` AND (${businessTypeConditions})`;
+        businessTypesArray.forEach(bt => {
+          params.push(`%${bt}%`);
+          params.push(`%${bt}%`);
+        });
+      }
     }
 
     // Add safety limit and ordering
     query += ' ORDER BY created_at DESC LIMIT ?';
     params.push(safeMaxResults);
+
+    logger.info(`Executing getAllLeads query: ${query} with params: ${JSON.stringify(params)}`);
 
     const leads = await getAll(query, params);
     
@@ -425,13 +450,36 @@ class GeminiService {
     if (state) {
       countQuery = this.buildStateCondition(state, countQuery, countParams);
     }
+    
+    // Handle multiple Zip Codes for count query
     if (zipCode) {
-      countQuery += ' AND zip_code = ?';
-      countParams.push(zipCode);
+      let zipCodesArray = parseLocations(zipCode); // Raw parsed locations
+       // Clean each item to be a 5-digit zip code
+      zipCodesArray = zipCodesArray.map(zc => {
+        const digits = zc.replace(/[^0-9]/g, ''); // Extract all digits
+        if (digits.length >= 5) return digits.slice(-5); // Take last 5 digits
+        return null;
+      }).filter(zc => zc !== null && zc.length === 5); // Ensure they are valid 5-digit zips
+
+      if (zipCodesArray.length > 0) {
+        countQuery += ` AND SUBSTR(REPLACE(zip_code, ' ', ''), -5) IN (${zipCodesArray.map(() => '?').join(',')})`;
+        countParams.push(...zipCodesArray);
+      }
     }
+
+    // Handle multiple Business Types for count query
     if (businessType) {
-      countQuery += ' AND LOWER(type_of_business) LIKE LOWER(?)';
-      countParams.push(`%${businessType}%`);
+      const businessTypesArray = parseBusinessTypes(businessType);
+      if (businessTypesArray.length > 0) {
+        const businessTypeConditions = businessTypesArray
+          .map(() => '(LOWER(type_of_business) LIKE LOWER(?) OR LOWER(sub_category) LIKE LOWER(?))')
+          .join(' OR ');
+        countQuery += ` AND (${businessTypeConditions})`;
+        businessTypesArray.forEach(bt => {
+          countParams.push(`%${bt}%`);
+          countParams.push(`%${bt}%`);
+        });
+      }
     }
     
     const totalResult = await getOne(countQuery, countParams);
@@ -540,9 +588,16 @@ class GeminiService {
 
     // Handle multiple Zip Codes
     if (zipCode) {
-      const zipCodesArray = parseLocations(zipCode);
+      let zipCodesArray = parseLocations(zipCode); // Raw parsed locations
+      // Clean each item to be a 5-digit zip code
+      zipCodesArray = zipCodesArray.map(zc => {
+        const digits = zc.replace(/[^0-9]/g, ''); // Extract all digits
+        if (digits.length >= 5) return digits.slice(-5); // Take last 5 digits
+        return null;
+      }).filter(zc => zc !== null && zc.length === 5); // Ensure they are valid 5-digit zips
+
       if (zipCodesArray.length > 0) {
-        query += ` AND zip_code IN (${zipCodesArray.map(() => '?').join(',')})`;
+        query += ` AND SUBSTR(REPLACE(zip_code, ' ', ''), -5) IN (${zipCodesArray.map(() => '?').join(',')})`;
         params.push(...zipCodesArray);
       }
     }

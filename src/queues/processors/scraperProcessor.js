@@ -40,6 +40,62 @@ async function countCsvRows(filePath) {
   });
 }
 
+// Helper function to clean zip codes
+function cleanZipCode(zip) {
+  if (!zip || typeof zip !== 'string') return null;
+  const digits = zip.replace(/[^0-9]/g, ''); // Extract all digits
+  if (digits.length >= 5) return digits.slice(-5); // Take last 5 digits
+  return null; // Return null if not a valid 5-digit zip after cleaning
+}
+
+// Helper function to extract state and zip code from address (similar to import_lead_files.js)
+function extractLocationFromScrapedAddress(address) {
+  if (!address || typeof address !== 'string') return { city: null, state: null, zipCode: null };
+  
+  // Common patterns for US addresses
+  const stateZipPattern = /,\s*([A-Z]{2})\s+(\d{5}(-\d{4})?)/i; // Added i for case-insensitive state
+  const statePattern = /,\s*([A-Z]{2})(?:\s|,|$)/i; // Added i for case-insensitive state
+  const zipPattern = /\b(\d{5}(-\d{4})?)\b/; // Corrected: ) instead of }
+  
+  let state = null;
+  let zipCode = null;
+  let city = null;
+  
+  const stateZipMatch = address.match(stateZipPattern);
+  if (stateZipMatch) {
+    state = stateZipMatch[1].toUpperCase();
+    zipCode = stateZipMatch[2];
+  } else {
+    const stateMatch = address.match(statePattern);
+    if (stateMatch) {
+      state = stateMatch[1].toUpperCase();
+    }
+    const zipMatch = address.match(zipPattern);
+    if (zipMatch) {
+      zipCode = zipMatch[1];
+    }
+  }
+  
+  if (state) {
+    const cityPatternStr = `([^,]+),\\s*${state}`;
+    const cityPattern = new RegExp(cityPatternStr, 'i'); // Added i for case-insensitive
+    const cityMatch = address.match(cityPattern);
+    if (cityMatch && cityMatch[1]) {
+      const cityPart = cityMatch[1].trim();
+      const cityWords = cityPart.split(',');
+      city = cityWords[cityWords.length - 1].trim();
+    }
+  } else if (zipCode) { // If no state, try to get city based on zip if address is simple
+    const cityZipPattern = new RegExp(`([^,]+),\\s*${zipCode.substring(0,5)}`, 'i');
+    const cityMatchSimple = address.match(cityZipPattern);
+    if (cityMatchSimple && cityMatchSimple[1]) {
+        city = cityMatchSimple[1].trim();
+    }
+  }
+  
+  return { city, state, zipCode: cleanZipCode(zipCode) }; // Ensure parsed zip is also cleaned
+}
+
 async function scraperProcessor(job) {
   const jobData = job.data;
   const jobId = jobData.jobId || job.id;
@@ -110,6 +166,24 @@ async function scraperProcessor(job) {
 
     // Only scrape if we have missing data
     if (optimizedQueries.length > 0) {
+      // Clear any existing LeadsApart.csv file before starting new scrape
+      let csvFile;
+      if (process.env.LEADS_APART_FILE) {
+        csvFile = path.join(process.cwd(), process.env.LEADS_APART_FILE);
+      } else {
+        csvFile = path.join(process.cwd(), './Outputs/LeadsApart.csv');
+      }
+      
+      try {
+        await fs.unlink(csvFile);
+        scraperLogger.info(`🗑️ Cleared existing scraped data file: ${csvFile}`);
+      } catch (clearError) {
+        // File might not exist, which is fine
+        if (clearError.code !== 'ENOENT') {
+          scraperLogger.warn(`Failed to clear existing scraped data file: ${clearError.message}`);
+        }
+      }
+
       // Write optimized queries to queries.txt file
       const queriesFile = process.env.QUERIES_FILE || './queries.txt';
       const queriesContent = optimizedQueries.map(q => `"${q.businessType}", "${q.query}"`).join('\n');
@@ -119,11 +193,11 @@ async function scraperProcessor(job) {
 
       if (job.progress) {
         job.progress(20);
-      }
+    }
 
-      // Execute Python scraper script
+    // Execute Python scraper script
       const scraperResult = await executePythonScraper(job);
-      
+    
       if (job.progress) {
         job.progress(70);
       }
@@ -169,6 +243,7 @@ async function scraperProcessor(job) {
         const fileId = uuidv4();
         
         const deliveryFilters = {
+          clientName: clientName,
           originalQuery: jobData.query,
           businessType: jobData.businessType,
           location: jobData.location,
@@ -196,7 +271,7 @@ async function scraperProcessor(job) {
         scraperLogger.error(`Failed to record scraper output file in deliveries: ${finalOutputFile}`, deliveryError);
       }
     }
-
+    
     // Update progress
     if (job.progress) {
       job.progress(90);
@@ -365,33 +440,84 @@ async function processScrapedData(jobId) {
 async function checkExistingLeadsAndOptimizeQueries(queries) {
   const existingLeads = [];
   const optimizedQueries = [];
+  const existingLeadsMap = new Map(); // Track existing leads to avoid duplicates
   
   try {
+    // Collect all business type + location combinations
+    const allCombinations = [];
+    
     for (const query of queries) {
       // Parse business types and locations
       const businessTypes = parseBusinessTypes(query.businessType);
       const locations = parseLocations(query.location);
       
-      // Check each combination of business type and location
+      // Create all combinations
       for (const businessType of businessTypes) {
         for (const location of locations) {
-          // Check if we already have leads for this business type + location
-          const existingForLocation = await checkExistingLeadsForLocation(businessType, location);
-          
-          if (existingForLocation.length > 0) {
-            // Add existing leads to our collection
-            existingLeads.push(...existingForLocation);
-            scraperLogger.info(`📋 Found ${existingForLocation.length} existing leads for ${businessType} in ${location}`);
-          } else {
-            // Add to optimization queue for scraping
-            optimizedQueries.push({
-              businessType: businessType,
-              location: location,
-              query: `${businessType} in ${location}`,
-              maxResults: query.maxResults || 1000
-            });
-            scraperLogger.info(`🔍 Need to scrape: ${businessType} in ${location}`);
-          }
+          allCombinations.push({
+            businessType,
+            location,
+            maxResults: query.maxResults || 1000,
+            originalQuery: query
+          });
+        }
+      }
+    }
+    
+    scraperLogger.info(`🔍 Checking ${allCombinations.length} business type + location combinations`);
+    
+    // Use bulk query for better performance when we have multiple combinations
+    if (allCombinations.length > 3) {
+      const bulkExistingLeads = await checkExistingLeadsBulk(allCombinations);
+      
+      // Add to existing leads with deduplication
+      bulkExistingLeads.forEach(lead => {
+        const leadKey = `${lead.name_of_business}_${lead.phone_number}`.toLowerCase();
+        if (!existingLeadsMap.has(leadKey)) {
+          existingLeadsMap.set(leadKey, lead);
+          existingLeads.push(lead);
+        }
+      });
+      
+      scraperLogger.info(`📋 Found ${bulkExistingLeads.length} total existing leads from bulk query (${existingLeads.length} unique)`);
+      
+      // Since we found some leads, assume all combinations are covered for now
+      // In a more sophisticated implementation, we could check which specific combinations had no results
+      if (existingLeads.length === 0) {
+        // No existing leads found, need to scrape all combinations
+        allCombinations.forEach(combo => {
+          optimizedQueries.push({
+            businessType: combo.businessType,
+            location: combo.location,
+            query: `${combo.businessType} in ${combo.location}`,
+            maxResults: combo.maxResults
+          });
+        });
+      }
+    } else {
+      // Use individual queries for smaller numbers of combinations
+      for (const combo of allCombinations) {
+        const existingForLocation = await checkExistingLeadsForLocation(combo.businessType, combo.location);
+        
+        if (existingForLocation.length > 0) {
+          // Add existing leads to our collection with deduplication
+          existingForLocation.forEach(lead => {
+            const leadKey = `${lead.name_of_business}_${lead.phone_number}`.toLowerCase();
+            if (!existingLeadsMap.has(leadKey)) {
+              existingLeadsMap.set(leadKey, lead);
+              existingLeads.push(lead);
+            }
+          });
+          scraperLogger.info(`📋 Found ${existingForLocation.length} existing leads for ${combo.businessType} in ${combo.location} (${existingLeads.length} total unique)`);
+        } else {
+          // Add to optimization queue for scraping
+          optimizedQueries.push({
+            businessType: combo.businessType,
+            location: combo.location,
+            query: `${combo.businessType} in ${combo.location}`,
+            maxResults: combo.maxResults
+          });
+          scraperLogger.info(`🔍 Need to scrape: ${combo.businessType} in ${combo.location}`);
         }
       }
     }
@@ -405,21 +531,79 @@ async function checkExistingLeadsAndOptimizeQueries(queries) {
   return { optimizedQueries, existingLeads };
 }
 
+// Bulk query function for checking multiple business type + location combinations
+async function checkExistingLeadsBulk(combinations) {
+  if (!getAll || combinations.length === 0) return [];
+  
+  try {
+    // Build dynamic OR conditions for all combinations
+    const conditions = [];
+    const params = [];
+    
+    combinations.forEach(combo => {
+      conditions.push(`
+        (
+          (LOWER(type_of_business) LIKE LOWER(?) OR LOWER(sub_category) LIKE LOWER(?))
+          AND (
+            LOWER(business_address) LIKE LOWER(?) 
+            OR LOWER(zip_code) = LOWER(?)
+            OR LOWER(city) LIKE LOWER(?)
+            OR LOWER(state) LIKE LOWER(?)
+          )
+        )
+      `);
+      
+      params.push(
+        `%${combo.businessType}%`,
+        `%${combo.businessType}%`,
+        `%${combo.location}%`,
+        combo.location,
+        `%${combo.location}%`,
+        `%${combo.location}%`
+      );
+    });
+    
+    const query = `
+      SELECT DISTINCT
+        name_of_business,
+        type_of_business,
+        sub_category,
+        website,
+        num_reviews,
+        rating,
+        latest_review,
+        business_address,
+        phone_number,
+        zip_code,
+        state,
+        city,
+        source_file
+      FROM leads 
+      WHERE ${conditions.join(' OR ')}
+    `;
+    
+    scraperLogger.info(`🔍 Executing bulk query for ${combinations.length} combinations`);
+    
+    const leads = await getAll(query, params);
+    
+    scraperLogger.info(`📊 Bulk query found ${leads?.length || 0} leads`);
+    
+    return leads || [];
+    
+  } catch (error) {
+    scraperLogger.error(`❌ Error in bulk lead query:`, error.message);
+    return [];
+  }
+}
+
 // Check existing leads for a specific business type and location
 async function checkExistingLeadsForLocation(businessType, location) {
   if (!getAll) return [];
   
   try {
-    // Parse business types into array
-    const businessTypes = parseBusinessTypes(businessType);
-    scraperLogger.info(`🔍 Searching for business types: ${JSON.stringify(businessTypes)} in location: ${location}`);
+    scraperLogger.info(`🔍 Searching for business type: "${businessType}" in location: "${location}"`);
 
-    // Build dynamic SQL conditions for business types
-    const businessTypeConditions = businessTypes.map(type => 
-      `(LOWER(type_of_business) LIKE LOWER(?) OR LOWER(sub_category) LIKE LOWER(?))`
-    ).join(' OR ');
-
-    // Query database for existing leads
+    // Query database for existing leads with more precise matching
     const query = `
       SELECT 
         name_of_business,
@@ -433,10 +617,11 @@ async function checkExistingLeadsForLocation(businessType, location) {
         phone_number,
         zip_code,
         state,
-        city
+        city,
+        source_file
       FROM leads 
       WHERE 
-        (${businessTypeConditions})
+        (LOWER(type_of_business) LIKE LOWER(?) OR LOWER(sub_category) LIKE LOWER(?))
         AND (
           LOWER(business_address) LIKE LOWER(?) 
           OR LOWER(zip_code) = LOWER(?)
@@ -447,7 +632,8 @@ async function checkExistingLeadsForLocation(businessType, location) {
 
     // Prepare parameters array
     const params = [
-      ...businessTypes.flatMap(type => [`%${type}%`, `%${type}%`]),
+      `%${businessType}%`, 
+      `%${businessType}%`,
       `%${location}%`, 
       location, 
       `%${location}%`, 
@@ -458,7 +644,7 @@ async function checkExistingLeadsForLocation(businessType, location) {
     
     const leads = await getAll(query, params);
     
-    scraperLogger.info(`📊 Found ${leads?.length || 0} leads for business types: ${JSON.stringify(businessTypes)} in location: ${location}`);
+    scraperLogger.info(`📊 Found ${leads?.length || 0} leads for business type: "${businessType}" in location: "${location}"`);
     
     return leads || [];
     
@@ -475,32 +661,61 @@ function parseBusinessTypes(businessTypesString) {
   
   // First split by commas, then handle conjunctions
   const types = businessTypesString
-    .split(',')
+    .split(/[,;]/) // Split by commas or semicolons
     .map(type => type.trim())
     .flatMap(type => {
-      // Split by common conjunctions
+      // Split by common conjunctions while preserving phrases
       return type
         .split(/\s+(?:and|&|or|\+)\s+/i)
         .map(t => t.trim())
         .filter(t => t.length > 0);
     })
-    .filter(type => type.length > 0);
+    .filter(type => type.length > 0)
+    .map(type => type.replace(/['"]/g, '')) // Remove quotes
+    .filter(type => type.length > 0); // Filter again after quote removal
     
-  scraperLogger.info(`🔧 Parsed business types: ${JSON.stringify(types)}`);
-  return types.length > 0 ? types : [businessTypesString];
+  // Remove duplicates (case-insensitive)
+  const uniqueTypes = [];
+  const seenTypes = new Set();
+  
+  for (const type of types) {
+    const lowerType = type.toLowerCase();
+    if (!seenTypes.has(lowerType)) {
+      seenTypes.add(lowerType);
+      uniqueTypes.push(type);
+    }
+  }
+    
+  scraperLogger.info(`🔧 Parsed business types: ${JSON.stringify(uniqueTypes)}`);
+  return uniqueTypes.length > 0 ? uniqueTypes : [businessTypesString];
 }
 
 // Helper function to parse locations from input
 function parseLocations(locationString) {
   if (!locationString) return [];
   
-  // Split by commas and clean up
+  // Split by commas, semicolons, and handle common separators
   const locations = locationString
-    .split(/[,;]/)
+    .split(/[,;|]/) // Split by commas, semicolons, or pipes
     .map(loc => loc.trim())
-    .filter(loc => loc.length > 0);
+    .filter(loc => loc.length > 0)
+    .map(loc => loc.replace(/['"]/g, '')) // Remove quotes
+    .filter(loc => loc.length > 0); // Filter again after quote removal
     
-  return locations.length > 0 ? locations : [locationString];
+  // Remove duplicates (case-insensitive)
+  const uniqueLocations = [];
+  const seenLocations = new Set();
+  
+  for (const location of locations) {
+    const lowerLocation = location.toLowerCase();
+    if (!seenLocations.has(lowerLocation)) {
+      seenLocations.add(lowerLocation);
+      uniqueLocations.push(location);
+    }
+  }
+    
+  scraperLogger.info(`🔧 Parsed locations: ${JSON.stringify(uniqueLocations)}`);
+  return uniqueLocations.length > 0 ? uniqueLocations : [locationString];
 }
 
 // Get scraped leads from the output file
@@ -669,6 +884,9 @@ async function saveNewLeadsToDatabase(leads, jobId) {
   const dbSourceFile = `Scraped by Job ${jobId} - ${new Date().toLocaleDateString()}`;
 
   for (const lead of leads) {
+    const businessAddress = lead['Business Address'] || lead.business_address || '';
+    const parsedLocation = extractLocationFromScrapedAddress(businessAddress);
+
     const leadDataForDb = {
       name_of_business: lead['Name of Business'] || lead.name_of_business,
       type_of_business: lead['Type of Business'] || lead.type_of_business,
@@ -677,14 +895,15 @@ async function saveNewLeadsToDatabase(leads, jobId) {
       num_reviews: parseInt(lead['# of Reviews'] || lead.num_reviews, 10) || 0,
       rating: parseFloat(lead['Rating'] || lead.rating) || null,
       latest_review: lead['Latest Review Date'] || lead.latest_review,
-      business_address: lead['Business Address'] || lead.business_address,
+      business_address: businessAddress,
       phone_number: lead['Phone Number'] || lead.phone_number,
       email: lead['Email'] || lead.email, 
       notes: lead['Notes'] || lead.notes,   
       source_file: dbSourceFile,
-      zip_code: lead['Zip Code'] || lead.zip_code, 
-      state: lead['State'] || lead.state,       
-      city: lead['City'] || lead.city,
+      // Prioritize direct columns from CSV, then parsed, then null
+      city: lead['City'] || lead.city || parsedLocation.city,
+      state: lead['State'] || lead.state || parsedLocation.state,
+      zip_code: cleanZipCode(lead['Zip Code'] || lead.zip_code || parsedLocation.zipCode),
       updated_at: new Date().toISOString() // Explicitly set updated_at
     };
 

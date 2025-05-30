@@ -48,6 +48,14 @@ const columnMapping = {
   'notes': ['Notes', 'Comments', 'Remarks', 'notes']
 };
 
+// Helper function to clean zip codes
+function cleanZipCode(zip) {
+  if (!zip || typeof zip !== 'string') return null;
+  const digits = zip.replace(/[^0-9]/g, ''); // Extract all digits
+  if (digits.length >= 5) return digits.slice(-5); // Take last 5 digits
+  return null; // Return null if not a valid 5-digit zip after cleaning
+}
+
 // Function to find the correct column name from the mapping
 function findColumnInSheet(sheet, targetColumn) {
   const possibleNames = columnMapping[targetColumn] || [];
@@ -186,7 +194,7 @@ async function processExcelFile(filePath, fileName) {
           businessAddress: businessAddress,
           city: row[columnMap.city]?.toString().trim() || addressLocation.city,
           state: row[columnMap.state]?.toString().trim() || addressLocation.state,
-          zipCode: row[columnMap.zip_code]?.toString().trim() || addressLocation.zipCode,
+          zipCode: cleanZipCode(row[columnMap.zip_code]?.toString().trim() || addressLocation.zipCode),
           rating: parseFloat(row[columnMap.rating]) || null,
           numReviews: parseInt(row[columnMap.num_reviews]) || 0,
           latestReview: row[columnMap.latest_review]?.toString().trim() || null,
