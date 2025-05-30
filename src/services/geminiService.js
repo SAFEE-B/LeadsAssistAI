@@ -33,7 +33,7 @@ class GeminiService {
     
     this.genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
     this.model = this.genAI.getGenerativeModel({ 
-      model: "gemini-1.5-flash",
+      model: "gemini-2.5-flash-preview-05-20",
       tools: [this.getToolDefinitions()]
     });
     
@@ -715,12 +715,16 @@ Be helpful, concise, and use tools when appropriate. Always confirm actions befo
         }
 
         // Send function results back to Gemini for final response
-        const functionResponse = await chat.sendMessage([{
+        // Map all tool results to the format expected by the API
+        const functionResponseParts = toolResults.map(toolResult => ({
           functionResponse: {
-            name: functionCalls[0].name,
-            response: toolResults[0].result
+            name: toolResult.functionName,
+            response: toolResult.result
           }
-        }]);
+        }));
+
+        // Send all function responses back to the model
+        const functionResponse = await chat.sendMessage(functionResponseParts);
 
         return {
           message: functionResponse.response.text(),

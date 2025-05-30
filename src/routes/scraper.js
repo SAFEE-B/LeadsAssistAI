@@ -40,14 +40,15 @@ router.post('/start', async (req, res) => {
     
     // Create scraping job record in database
     await runQuery(
-      'INSERT INTO scraping_jobs (job_id, client_name, business_types, zip_codes, states, queries_generated) VALUES (?, ?, ?, ?, ?, ?)',
+      'INSERT INTO scraping_jobs (job_id, client_name, business_types, zip_codes, states, queries_generated, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
       [
         jobId,
         clientName,
         JSON.stringify(businessTypes),
         JSON.stringify(zipCodes),
         JSON.stringify(states || []),
-        queries.length
+        queries.length,
+        'waiting'
       ]
     );
 
@@ -160,8 +161,8 @@ router.get('/jobs', async (req, res) => {
       conditions.push('status = ?');
       params.push(status);
     } else {
-      // If no specific status is requested, default to queued jobs
-      conditions.push("(status = 'pending' OR status = 'waiting' OR status = 'active')");
+      // If no specific status is requested, default to queued and processing jobs
+      conditions.push("(status = 'pending' OR status = 'waiting' OR status = 'active' OR status = 'processing')");
     }
 
     if (clientName) {
