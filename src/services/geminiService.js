@@ -47,25 +47,25 @@ class GeminiService {
       function_declarations: [
         {
           name: "get_lead_count",
-          description: "Get the total count of leads in the database, optionally filtered by location or business type",
+          description: "Get the total count of leads in the database, optionally filtered by location or business type. Handles multiple comma-separated values for location and business type parameters.",
           parameters: {
             type: "object",
             properties: {
               city: {
                 type: "string",
-                description: "Filter by city name"
+                description: "Filter by city name. Can be a single city or a comma-separated list of cities (e.g., 'Las Vegas, Henderson')."
               },
               state: {
                 type: "string", 
-                description: "Filter by state name or abbreviation"
+                description: "Filter by state name or abbreviation. Can be a single state or a comma-separated list of states (e.g., 'NV, CA')."
               },
               zipCode: {
                 type: "string",
-                description: "Filter by zip code"
+                description: "Filter by zip code. Can be a single zip code or a comma-separated list of zip codes (e.g., '89101, 89102, 89128')."
               },
               businessType: {
                 type: "string",
-                description: "Filter by business type or category"
+                description: "Filter by business type or category. Can be a single type or a comma-separated list of business types (e.g., 'restaurants, gyms, warehouses')."
               }
             }
           }
@@ -144,11 +144,11 @@ class GeminiService {
               },
               businessType: {
                 type: "string", 
-                description: "Type of business to search for"
+                description: "Type(s) of business to search for. Can be a single business type or a comma-separated list (e.g., 'restaurants, coffee shops')."
               },
               maxResults: {
                 type: "number",
-                description: "Maximum number of results to scrape (default 100)"
+                description: "Maximum number of results for the scraper to fetch for each individual query (defaults to 15)."
               }
             },
             required: ["location", "businessType"]
@@ -299,21 +299,66 @@ class GeminiService {
     const params = [];
 
     if (city) {
-      query += ' AND LOWER(city) LIKE LOWER(?)';
-      params.push(`%${city}%`);
+      const citiesArray = parseLocations(city);
+      if (citiesArray.length > 0) {
+        const cityConditions = citiesArray.map(() => 'LOWER(city) LIKE LOWER(?)').join(' OR ');
+        query += ` AND (${cityConditions})`;
+        citiesArray.forEach(c => params.push(`%${c}%`));
     }
-    if (state) {
-      query = this.buildStateCondition(state, query, params);
-    }
-    if (zipCode) {
-      query += ' AND zip_code = ?';
-      params.push(zipCode);
-    }
-    if (businessType) {
-      query += ' AND LOWER(type_of_business) LIKE LOWER(?)';
-      params.push(`%${businessType}%`);
     }
 
+    if (state) {
+      // Option 1: Simple LIKE for each state if multiple, or use existing buildStateCondition if single
+      // For now, let's adapt to multiple states with simple LIKE for each.
+      // buildStateCondition might need rework if it doesn't expect an array or produces incorrect AND/OR logic for multiples.
+      const statesArray = parseLocations(state); // Assuming state can also be a comma-separated list
+      if (statesArray.length > 0) {
+        const stateConditions = statesArray.map(s => {
+          const stateAbbr = this.mapStateToAbbreviation(s);
+          if (stateAbbr !== s && stateAbbr.length === 2) {
+            params.push(stateAbbr.toUpperCase());
+            return 'UPPER(state) = UPPER(?)';
+          } else {
+            params.push(`%${s}%`);
+            params.push(`%${stateAbbr}%`);
+            return '(LOWER(state) LIKE LOWER(?) OR LOWER(state) LIKE LOWER(?))';
+          }
+        }).join(' OR ');
+        query += ` AND (${stateConditions})`;
+      }
+    }
+
+    if (zipCode) {
+      let zipCodesArray = parseLocations(zipCode);
+      zipCodesArray = zipCodesArray.map(zc => {
+        const digits = zc.replace(/[^0-9]/g, '');
+        if (digits.length >= 5) return digits.slice(-5);
+        return null;
+      }).filter(zc => zc !== null && zc.length === 5);
+
+      if (zipCodesArray.length > 0) {
+        // Ensure zip_code is compared as string and handle potential spaces/hyphens
+        // Using SUBSTR(REPLACE(zip_code, ' ', ''), -5) to get the last 5 digits for comparison
+        query += ` AND SUBSTR(REPLACE(zip_code, ' ', ''), -5) IN (${zipCodesArray.map(() => '?').join(',')})`;
+        params.push(...zipCodesArray);
+    }
+    }
+
+    if (businessType) {
+      const businessTypesArray = parseBusinessTypes(businessType);
+      if (businessTypesArray.length > 0) {
+        const businessTypeConditions = businessTypesArray
+          .map(() => '(LOWER(type_of_business) LIKE LOWER(?) OR LOWER(sub_category) LIKE LOWER(?))')
+          .join(' OR ');
+        query += ` AND (${businessTypeConditions})`;
+        businessTypesArray.forEach(bt => {
+          params.push(`%${bt}%`);
+          params.push(`%${bt}%`); // For sub_category match
+        });
+      }
+    }
+
+    logger.info(`Executing getLeadCount query: ${query} with params: ${JSON.stringify(params)}`);
     const result = await getOne(query, params);
     return { count: result.count, filters: args };
   }
@@ -516,7 +561,7 @@ class GeminiService {
   }
 
   async startScrapingJob(args) {
-    const { location, businessType, maxResults = 100 } = args;
+    const { location, businessType, maxResults = 15 } = args;
     
     const jobData = {
       query: `${businessType} in ${location}`,
@@ -532,8 +577,7 @@ class GeminiService {
     return {
       success: true,
       jobId: job.id,
-      message: `Started scraping job for ${businessType} in ${location}`,
-      estimatedResults: maxResults
+      message: `Started scraping job for ${businessType} in ${location} (limit ${maxResults} results per query).`
     };
   }
 
