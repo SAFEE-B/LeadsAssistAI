@@ -4,6 +4,10 @@ import axios from 'axios';
 const api = axios.create({
   baseURL: process.env.REACT_APP_API_URL || 'http://localhost:3000',
   timeout: 30000, // 30 seconds timeout
+  headers: {
+    'ngrok-skip-browser-warning': 'true',
+    'User-Agent': 'LeadAssistAI-Frontend/1.0.0'
+  }
 });
 
 // Add request interceptor to include auth token
@@ -13,6 +17,11 @@ api.interceptors.request.use(
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+    
+    // Ensure ngrok headers are always present
+    config.headers['ngrok-skip-browser-warning'] = 'true';
+    config.headers['User-Agent'] = 'LeadAssistAI-Frontend/1.0.0';
+    
     return config;
   },
   (error) => {

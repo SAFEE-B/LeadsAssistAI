@@ -314,6 +314,17 @@ const Chat = () => {
             </div>
           )}
 
+          {/* DEBUG: Show actual data */}
+          <div style={{background: '#f0f0f0', padding: '10px', fontSize: '12px', marginBottom: '10px'}}>
+            <strong>🔧 DEBUG INFO:</strong><br/>
+            Queue Loading: {queueLoading ? 'true' : 'false'}<br/>
+            Queue Stats: {queueStats ? 'Has Data' : 'No Data'}<br/>
+            Queue Stats JSON: {JSON.stringify(queueStats)}<br/>
+            Deliveries Loading: {deliveriesLoading ? 'true' : 'false'}<br/>
+            Deliveries Count: {deliveries?.length || 0}<br/>
+            Deliveries JSON: {JSON.stringify(deliveries?.slice(0, 2))}
+          </div>
+
           {/* Enhanced Queue Statistics */}
           {queueStats && (
             <div className="queue-overview">
