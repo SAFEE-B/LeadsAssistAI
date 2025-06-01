@@ -902,7 +902,7 @@ async function combineLeadsIntoFinalFile(existingLeads, newLeads, jobData) {
         if (agoIndex !== -1) {
           latestReview = latestReview.substring(0, agoIndex + REQUIRED_REVIEW_TEXT.length).trim();
         }
-      } else {
+        } else {
         latestReview = '';
       }
 
@@ -1144,12 +1144,33 @@ function applyLeadFilters(lead, primaryJobTypesLowerCase) {
         matchesPrimaryJobTypeFilter = true; // No specific job type filter from jobData, pass all (should not happen if jobData is validated)
     } else {
         for (const primaryType of primaryJobTypesLowerCase) {
-            const allowedSubcategories = business_filters[primaryType] || [];
-            // A lead matches if its main type OR its sub-category is in the allowed list for the *job's* primary type.
-            // Or if the lead's main type itself is an allowed subcategory (e.g. primaryType "rv parks", lead type "campground")
-            if (allowedSubcategories.includes(typeOfBusiness) || allowedSubcategories.includes(subCategory)) {
-                matchesPrimaryJobTypeFilter = true;
-                break;
+            // Check if this business type is one of the types that should have filtering applied
+            const shouldApplyFilter = Object.keys(business_filters).some(filterKey => 
+                filterKey.toLowerCase() === primaryType.toLowerCase()
+            );
+            
+            if (shouldApplyFilter) {
+                // This business type IS in the business_filters, so apply filtering
+                const allowedSubcategories = business_filters[primaryType] || 
+                    business_filters[Object.keys(business_filters).find(key => key.toLowerCase() === primaryType.toLowerCase())];
+                
+                if (allowedSubcategories && allowedSubcategories.length > 0) {
+                    // A lead matches if its main type OR its sub-category is in the allowed list for the job's primary type
+                    if (allowedSubcategories.some(allowed => 
+                        typeOfBusiness.includes(allowed.toLowerCase()) || 
+                        subCategory.includes(allowed.toLowerCase())
+                    )) {
+                        matchesPrimaryJobTypeFilter = true;
+                        break;
+                    }
+                }
+            } else {
+                // This business type is NOT in business_filters, so no filtering - allow all leads that match the type
+                if (typeOfBusiness.includes(primaryType) || primaryType.includes(typeOfBusiness) ||
+                    subCategory.includes(primaryType) || primaryType.includes(subCategory)) {
+                    matchesPrimaryJobTypeFilter = true;
+                    break;
+                }
             }
         }
     }

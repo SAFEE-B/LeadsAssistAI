@@ -163,13 +163,27 @@ print_status("After US filter", df.shape[0])
 
 
 # Apply business type and sub-category filters
+# Only apply filters to business types that are specifically defined in business_filters
 for business_type, valid_subcategories in business_filters.items():
-    df_before = df.copy()
-    mask = df["Type of Business"].str.contains(business_type, case=False, na=False) & \
-           ~df["Sub-Category"].str.contains('|'.join(valid_subcategories), case=False, na=False)
-    df = df[~mask]
-    print_status(f"After filtering '{business_type}'", df.shape[0])
-    print_filtered_categories(df_before, df, f"Filter '{business_type}'")
+    # Check if any of the leads have this specific business type
+    business_type_lower = business_type.lower()
+    has_matching_leads = df["Type of Business"].str.contains(business_type_lower, case=False, na=False).any()
+    
+    if has_matching_leads and valid_subcategories and len(valid_subcategories) > 0:
+        df_before = df.copy()
+        # Filter out leads where the Type of Business matches the filter key
+        # BUT the Sub-Category is NOT in the allowed list
+        mask = df["Type of Business"].str.contains(business_type_lower, case=False, na=False) & \
+               ~df["Sub-Category"].str.contains('|'.join(valid_subcategories), case=False, na=False)
+        df = df[~mask]
+        print_status(f"After filtering '{business_type}' (has sub-category filters)", df.shape[0])
+        print_filtered_categories(df_before, df, f"Filter '{business_type}' (has sub-category filters)")
+    elif has_matching_leads:
+        # Business type exists in data but no sub-category filters defined
+        print_status(f"Skipping filter for '{business_type}' (no sub-category filters defined)", df.shape[0])
+
+# For business types not in business_filters, no filtering is applied (they pass through as-is)
+print_status("Final count after business type filtering", df.shape[0])
 
 # Capitalize the first letter of each word in "Type of Business" and "Sub-Category"
 df["Type of Business"] = df["Type of Business"].str.title()

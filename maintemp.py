@@ -18,7 +18,7 @@ from concurrent.futures import ThreadPoolExecutor
 import logging
 
 
-MAX_QUERIES=10
+MAX_QUERIES=15
 
 
 # Lock for thread-safe CSV writing
