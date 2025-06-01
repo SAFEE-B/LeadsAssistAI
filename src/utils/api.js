@@ -2,7 +2,7 @@ import axios from 'axios';
 
 // Create axios instance with base configuration
 const api = axios.create({
-  baseURL: 'http://localhost:3000', // Force correct backend port
+  baseURL: process.env.REACT_APP_API_URL || 'http://localhost:3000',
   timeout: 30000, // 30 seconds timeout
 });
 

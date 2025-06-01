@@ -9,8 +9,8 @@ import {
 import './App.css';
 
 // Import components
+import Landing from './components/Landing';
 import Login from './components/Login';
-import Signup from './components/Signup';
 import Chat from './components/Chat';
 
 // Basic PrivateRoute component
@@ -19,60 +19,90 @@ const PrivateRoute = ({ children }) => {
   return isAuthenticated ? children : <Navigate to="/login" />;
 };
 
-function App() {
-  // Simple way to check if user is authenticated for nav display
-  // In a real app, this would likely come from a context or state management
+// Header component for better navigation
+const Header = () => {
   const isAuthenticated = !!localStorage.getItem('authToken');
+  const user = JSON.parse(localStorage.getItem('user') || '{}');
 
   const handleLogout = () => {
     localStorage.removeItem('authToken');
     localStorage.removeItem('user');
-    // Force a re-render by reloading the page
-    window.location.href = '/login'; 
+    window.location.href = '/'; 
   };
+
+  const handleRequestDemo = () => {
+    const subject = 'LeadAssistAI Demo Request';
+    const body = `Hello LeadAssistAI Team,
+
+I would like to request a demo of LeadAssistAI to see how it can help with lead generation and management for my business.
+
+Please contact me to schedule a demonstration.
+
+Best regards`;
+    
+    window.open(`mailto:demo@leadassistai.com?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`, '_blank');
+  };
+
+  return (
+    <header className="main-header">
+      <div className="header-container">
+        <Link to="/" className="logo">
+          <span className="logo-icon">🤖</span>
+          <span className="logo-text">LeadAssistAI</span>
+        </Link>
+        
+        <nav className="header-nav">
+          {!isAuthenticated ? (
+            <>
+              <Link to="/" className="nav-link">Home</Link>
+              <div className="auth-buttons">
+                <Link to="/login" className="nav-link login-link">Login</Link>
+                <button onClick={handleRequestDemo} className="nav-link demo-btn">Request Demo</button>
+              </div>
+            </>
+          ) : (
+            <>
+              <Link to="/dashboard" className="nav-link">Dashboard</Link>
+              <div className="user-menu">
+                <span className="user-welcome">Welcome, {user.username || 'User'}</span>
+                <button onClick={handleLogout} className="logout-btn">Logout</button>
+              </div>
+            </>
+          )}
+        </nav>
+      </div>
+    </header>
+  );
+};
+
+function App() {
+  const isAuthenticated = !!localStorage.getItem('authToken');
 
   return (
     <Router>
       <div className="App">
-        <nav>
-          <ul>
-            <li>
-              <Link to="/">🏠 Dashboard</Link>
-            </li>
-            {isAuthenticated ? (
-              <li>
-                <button onClick={handleLogout}>🚪 Logout</button>
-              </li>
-            ) : (
-              <>
-                <li>
-                  <Link to="/login">🔑 Login</Link>
-                </li>
-                <li>
-                  <Link to="/signup">📝 Sign Up</Link>
-                </li>
-              </>
-            )}
-          </ul>
-        </nav>
-
+        <Header />
+        
         <main className="App-content">
           <Routes>
-            <Route path="/login" element={<Login />} />
-            <Route path="/signup" element={<Signup />} />
+            {/* Public Routes */}
+            <Route path="/" element={isAuthenticated ? <Navigate to="/dashboard" /> : <Landing />} />
+            <Route path="/login" element={isAuthenticated ? <Navigate to="/dashboard" /> : <Login />} />
             
+            {/* Protected Routes */}
             <Route 
-              path="/" 
+              path="/dashboard" 
               element={
                 <PrivateRoute>
                   <Chat />
                 </PrivateRoute>
               }
             />
-             {/* Redirect unknown paths to home or login based on auth */}
+            
+            {/* Redirect unknown paths */}
             <Route 
               path="*" 
-              element={isAuthenticated ? <Navigate to="/" /> : <Navigate to="/login" />}
+              element={isAuthenticated ? <Navigate to="/dashboard" /> : <Navigate to="/" />}
             />
           </Routes>
         </main>
