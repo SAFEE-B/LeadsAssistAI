@@ -26,6 +26,10 @@ const Chat = () => {
   useEffect(scrollToBottom, [messages]);
 
   useEffect(() => {
+    // Add debug logging
+    console.log('🔧 DEBUG: API URL:', process.env.REACT_APP_API_URL);
+    console.log('🔧 DEBUG: Environment:', process.env.REACT_APP_ENVIRONMENT);
+    
     // Add welcome message
     setMessages([
       {
@@ -55,12 +59,15 @@ const Chat = () => {
   // Queue functions
   const fetchQueueData = async () => {
     try {
+      console.log('🔄 DEBUG: Fetching queue data...');
       // Fetch queue statistics
       const statsResponse = await api.get('/api/status/queues');
+      console.log('✅ DEBUG: Queue data received:', statsResponse.data);
       setQueueStats(statsResponse.data.queueStats);
       
       setQueueError('');
     } catch (err) {
+      console.error('❌ DEBUG: Queue fetch error:', err);
       setQueueError('Failed to fetch queue data');
       console.error('Queue fetch error:', err);
     } finally {
@@ -71,10 +78,13 @@ const Chat = () => {
   // Deliveries functions
   const fetchDeliveries = async () => {
     try {
+      console.log('🔄 DEBUG: Fetching deliveries...');
       const response = await api.get('/api/delivery/recent');
+      console.log('✅ DEBUG: Deliveries data received:', response.data);
       setDeliveries(response.data.deliveries || []);
       setDeliveriesError('');
     } catch (err) {
+      console.error('❌ DEBUG: Deliveries fetch error:', err);
       setDeliveriesError('Failed to fetch deliveries');
       console.error('Deliveries fetch error:', err);
     } finally {
